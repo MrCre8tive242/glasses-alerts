@@ -1,0 +1,67 @@
+package com.glassesalerts
+
+import android.content.Context
+import android.content.SharedPreferences
+import com.glassesalerts.logic.QuickReplies
+
+/** Simple wrapper around SharedPreferences for the app's settings. */
+class Prefs(context: Context) {
+    private val sp: SharedPreferences =
+        context.applicationContext.getSharedPreferences("glasses_alerts", Context.MODE_PRIVATE)
+
+    var enabled: Boolean
+        get() = sp.getBoolean("enabled", true)
+        set(v) = sp.edit().putBoolean("enabled", v).apply()
+
+    /** Also announce the regular WhatsApp app, not just WhatsApp Business. */
+    var includeRegularWhatsApp: Boolean
+        get() = sp.getBoolean("include_regular", false)
+        set(v) = sp.edit().putBoolean("include_regular", v).apply()
+
+    var includeGroups: Boolean
+        get() = sp.getBoolean("include_groups", false)
+        set(v) = sp.edit().putBoolean("include_groups", v).apply()
+
+    /** true = read the message text, false = only say who it is from. */
+    var readMessageBody: Boolean
+        get() = sp.getBoolean("read_body", true)
+        set(v) = sp.edit().putBoolean("read_body", v).apply()
+
+    /** Only speak when a Bluetooth audio device (your glasses) is connected. */
+    var onlyWhenBluetooth: Boolean
+        get() = sp.getBoolean("only_bt", true)
+        set(v) = sp.edit().putBoolean("only_bt", v).apply()
+
+    var quietHoursEnabled: Boolean
+        get() = sp.getBoolean("quiet_enabled", false)
+        set(v) = sp.edit().putBoolean("quiet_enabled", v).apply()
+
+    /** Hour of day, 0-23. Default quiet time is 10 PM to 7 AM. */
+    var quietStartHour: Int
+        get() = sp.getInt("quiet_start", 22)
+        set(v) = sp.edit().putInt("quiet_start", v.coerceIn(0, 23)).apply()
+
+    var quietEndHour: Int
+        get() = sp.getInt("quiet_end", 7)
+        set(v) = sp.edit().putInt("quiet_end", v.coerceIn(0, 23)).apply()
+
+    /** Announce incoming calls and allow answer/decline with glasses taps. */
+    var enableCalls: Boolean
+        get() = sp.getBoolean("enable_calls", true)
+        set(v) = sp.edit().putBoolean("enable_calls", v).apply()
+
+    /** Offer quick replies after a message is read. */
+    var enableReplies: Boolean
+        get() = sp.getBoolean("enable_replies", true)
+        set(v) = sp.edit().putBoolean("enable_replies", v).apply()
+
+    /** Offer to play voice notes. Needs "All files access". */
+    var enableVoiceNotes: Boolean
+        get() = sp.getBoolean("enable_voice", true)
+        set(v) = sp.edit().putBoolean("enable_voice", v).apply()
+
+    /** One quick reply per line. */
+    var quickReplies: String
+        get() = sp.getString("quick_replies", QuickReplies.DEFAULT_RAW) ?: QuickReplies.DEFAULT_RAW
+        set(v) = sp.edit().putString("quick_replies", v).apply()
+}
