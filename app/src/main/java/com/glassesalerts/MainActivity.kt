@@ -37,6 +37,7 @@ class MainActivity : Activity() {
     private lateinit var filesText: TextView
     private lateinit var overlayText: TextView
     private lateinit var micText: TextView
+    private lateinit var dictLogText: TextView
     private val ui = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
@@ -101,6 +102,7 @@ class MainActivity : Activity() {
         } else {
             "Microphone access is OFF. Spoken replies will not work until you allow it (step 5)."
         }
+        dictLogText.text = "Last spoken reply: " + DictationLog.last
         lastButtonText.text = "Last glasses button: " + ButtonLog.last
     }
 
@@ -190,6 +192,8 @@ class MainActivity : Activity() {
         })
         lastButtonText = label("")
         col.addView(lastButtonText)
+        dictLogText = label("")
+        col.addView(dictLogText)
         col.addView(label("How taps work: tap = answer / reply / play. Double tap forward = decline / next reply. Triple tap = cancel."))
 
         col.addView(label("Features", bold = true, size = 20f))

@@ -72,6 +72,8 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     private var voiceFile: File? = null
     private var voiceSearching = false
     private var playWhenReady = false
+    private var voiceSender: String? = null
+    private var voiceKey: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -174,6 +176,11 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             }
             Kind.VOICE_NOTE -> {
                 speak(Speech.voiceNote(result.sender))
+                // Keep the notification so a reply can be offered after the voice note has played.
+                messageSbns[sbn.key] = sbn
+                while (messageSbns.size > 20) messageSbns.remove(messageSbns.keys.first())
+                voiceSender = result.sender
+                voiceKey = sbn.key
                 if (prefs.enableVoiceNotes) {
                     prefetchVoiceNote(pkg, now)
                     handle(sm.onVoiceNote(result.sender))
@@ -426,6 +433,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             mp.setOnCompletionListener {
                 it.release()
                 if (player === it) player = null
+                offerReplyAfterVoice()
             }
             mp.setOnErrorListener { m, _, _ ->
                 m.release()
@@ -439,6 +447,18 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         } catch (e: Exception) {
             speak("Could not play that voice message.", true)
         }
+    }
+
+    /** After a voice note has played, offer "Double tap to reply", like after a text message. */
+    private fun offerReplyAfterVoice() {
+        val key = voiceKey ?: return
+        val sender = voiceSender ?: return
+        voiceKey = null
+        val sbn = messageSbns[key] ?: return
+        val canReply = prefs.enableReplies && findReplyActions(sbn.notification).isNotEmpty()
+        handle(sm.onMessage(sender, key, canReply))
+        refreshSession()
+        main.postDelayed({ refreshSession() }, 46_000L)
     }
 
     // ------------------------------------------------------------------ glasses buttons

@@ -116,3 +116,10 @@ Device finding: only double taps worked. Ray-Ban Meta sends single tap = play/pa
 ## Refinement Log 4 (Sonnet 5.5)
 Device finding: with the button test running, only media next (double tap) and media previous (triple tap) reach the phone. The single tap never arrives, so it cannot be used. Prompts now say "Double tap to ..." everywhere; double tap = main action, triple tap = cancel / decline. Play/pause keys stay mapped as primary in case other headsets send them.
 Idea if single tap is wanted later (untested): keep a silent audio stream playing while an offer is pending, so the Bluetooth stack treats the phone as "playing" and may forward the glasses' play/pause.
+
+## Refinement Log 5 (Sonnet 5.5)
+Device findings: (1) a voice note could be played but there was no way to reply afterwards; (2) spoken reply: the microphone opened and closed within about a second, then "I did not catch that".
+1. After a voice note finishes playing the app offers "Double tap to reply" (the voice note notification is kept for its reply action).
+2. Dictation: an error within 2.5 s and before any speech is treated as technical, not silence. Try 1 uses the glasses microphone; on a quick failure try 2 uses the phone microphone; a second quick failure reports "unavailable" so the app falls back to quick replies instead of saying "I did not catch that". Removed EXTRA_PREFER_OFFLINE (an offline language pack that is not installed fails immediately). Recognizer is destroyed and recreated per try.
+3. Diagnostics: the settings screen shows "Last spoken reply" (try number, which microphone, error code and name, time in ms). Same line goes to Logcat (tag GlassesAlerts).
+Open: if both tries fail with the same quick error, the likely cause is Android refusing the microphone to a background service (error 7 or 5 within a second). Next step would be a short transparent Activity to record in the foreground.

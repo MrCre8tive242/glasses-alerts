@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -31,7 +32,11 @@ import android.view.WindowManager
  * Android only lets an app record audio while it is visible or running as one.
  *
  * To work from the background it also shows a 1-pixel invisible overlay (uses the
- * "Display over other apps" permission) and routes audio to the glasses microphone if connected.
+ * "Display over other apps" permission).
+ *
+ * Try 1 uses the glasses microphone (if connected). If the recognizer fails right away (which
+ * means a technical problem, not silence), try 2 uses the phone microphone. If that fails right
+ * away too, the service reports "unavailable" so the app can fall back to quick replies.
  */
 class DictationService : Service() {
 
@@ -43,6 +48,9 @@ class DictationService : Service() {
     private var finished = false
     private var routed = false
     private var oldMode = AudioManager.MODE_NORMAL
+    private var attempt = 0
+    private var listenStartedAt = 0L
+    private var heardSpeech = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -68,33 +76,51 @@ class DictationService : Service() {
     }
 
     private fun begin() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
-            !SpeechRecognizer.isRecognitionAvailable(this)
-        ) {
-            Log.d(TAG, "dictation unavailable: permission or recognizer missing")
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            DictationLog.record("Microphone permission is not granted")
             finish(null, true)
             return
         }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            DictationLog.record("No speech recognizer installed on this phone")
+            finish(null, true)
+            return
+        }
+        DictationLog.record("starting...")
         addOverlay()
-        routeToGlassesMic()
         try {
             tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
         } catch (e: Exception) {
             // no beep: fine
         }
+        startAttempt(useGlasses = true)
+        main.postDelayed({ finish(null, false) }, 30_000L)
+    }
 
+    private fun startAttempt(useGlasses: Boolean) {
+        if (finished) return
+        attempt++
+        heardSpeech = false
+        unroute()
+        if (useGlasses) routeToGlassesMic()
+        try {
+            recognizer?.destroy()
+        } catch (e: Exception) {
+        }
         val r = SpeechRecognizer.createSpeechRecognizer(this)
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                Log.d(TAG, "ready for speech")
                 try {
                     tone?.startTone(ToneGenerator.TONE_PROP_PROMPT, 150)
                 } catch (e: Exception) {
                 }
             }
 
-            override fun onBeginningOfSpeech() {}
+            override fun onBeginningOfSpeech() {
+                heardSpeech = true
+            }
+
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
@@ -102,24 +128,32 @@ class DictationService : Service() {
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
             override fun onError(error: Int) {
-                Log.d(TAG, "recognizer error $error")
-                val unavailable = error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
-                    error == SpeechRecognizer.ERROR_NETWORK ||
-                    error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT ||
-                    error == SpeechRecognizer.ERROR_SERVER
-                finish(null, unavailable)
+                val elapsed = SystemClock.elapsedRealtime() - listenStartedAt
+                val mic = if (routed) "glasses" else "phone"
+                DictationLog.record("Try $attempt ($mic mic): error $error ${errorName(error)} after $elapsed ms")
+                if (error == 9) { // no microphone permission
+                    finish(null, true)
+                    return
+                }
+                // An error within 2.5 seconds, before any speech, is a technical failure, not silence.
+                val technical = elapsed < 2_500L && !heardSpeech
+                if (technical && attempt == 1) {
+                    main.postDelayed({ startAttempt(useGlasses = false) }, 300L)
+                    return
+                }
+                finish(null, technical)
             }
 
             override fun onResults(results: Bundle?) {
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                Log.d(TAG, "recognized: ${text?.length ?: 0} characters")
+                val mic = if (routed) "glasses" else "phone"
+                DictationLog.record("Try $attempt ($mic mic): heard ${text?.length ?: 0} characters")
                 finish(text, false)
             }
         })
 
         // Give the Bluetooth microphone a moment to connect before listening.
-        main.postDelayed({ startListening() }, if (routed) 600L else 50L)
-        main.postDelayed({ finish(null, false) }, 25_000L)
+        main.postDelayed({ startListening() }, if (routed) 900L else 150L)
     }
 
     private fun startListening() {
@@ -129,13 +163,13 @@ class DictationService : Service() {
         i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
         i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+        listenStartedAt = SystemClock.elapsedRealtime()
         try {
             recognizer?.startListening(i)
         } catch (e: Exception) {
-            Log.d(TAG, "startListening failed: ${e.message}")
+            DictationLog.record("startListening failed: ${e.message}")
             finish(null, true)
         }
     }
@@ -253,5 +287,22 @@ class DictationService : Service() {
         /** Called once when dictation ends: (recognized text or null, true if speaking is unavailable). */
         @Volatile
         var listener: ((String?, Boolean) -> Unit)? = null
+
+        fun errorName(code: Int): String = when (code) {
+            1 -> "network timeout"
+            2 -> "network"
+            3 -> "audio recording"
+            4 -> "server"
+            5 -> "client"
+            6 -> "no speech heard"
+            7 -> "no match"
+            8 -> "recognizer busy"
+            9 -> "no microphone permission"
+            10 -> "too many requests"
+            11 -> "server disconnected"
+            12 -> "language not supported"
+            13 -> "language unavailable"
+            else -> "other"
+        }
     }
 }

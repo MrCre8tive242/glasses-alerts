@@ -45,7 +45,7 @@ On the Ray-Ban Meta Gen 2, the single tap stays inside the glasses and is never 
   - Call ringing: answer
   - After a message ("Double tap to reply"): start speaking your reply (a beep means it is listening)
   - After it reads back what you said ("Double tap to send"): send
-  - After a voice note ("Double tap to play"): play
+  - After a voice note ("Double tap to play"): play. When it finishes you hear "Double tap to reply".
 - **Triple tap = cancel**
   - Call ringing: decline
   - After the read-back: "Cancelled. Double tap to speak again."
@@ -56,7 +56,9 @@ Run step 7 to see what each of your gestures actually sends.
 
 ## Spoken replies
 - Speak after the second beep. The app waits for a short pause, then reads back "You said: ...".
-- It uses your phone's speech recognition, and tries the glasses microphone first.
+- It uses your phone's speech recognition, and tries the glasses microphone first. If that fails
+  straight away it tries the phone microphone once. The settings screen shows "Last spoken reply"
+  with the exact result, which helps to find problems.
   Depending on your phone, your own voice may be processed by Google's speech service.
   Customers' messages and audio are never sent anywhere by this app.
 - If speaking is unavailable (no microphone permission, no recognizer), it falls back to
