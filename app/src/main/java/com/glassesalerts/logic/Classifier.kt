@@ -39,8 +39,10 @@ object Classifier {
         val title = cleanTitle(i.title)
 
         if (i.isCall) {
-            // An ongoing/finished call has no Answer button: nothing to announce.
-            if (!i.hasAnswerAction) return Classified(Kind.IGNORE)
+            // WhatsApp can post the ring notification before its Answer button is attached, so
+            // "Incoming ..." text counts too. Ongoing, outgoing and ended calls have neither.
+            val incoming = i.hasAnswerAction || i.text.contains("incoming", ignoreCase = true)
+            if (!incoming) return Classified(Kind.IGNORE)
             val detail = if (i.text.contains("video", ignoreCase = true)) "video" else "voice"
             return Classified(Kind.INCOMING_CALL, title.ifEmpty { "an unknown caller" }, detail)
         }
@@ -59,7 +61,7 @@ object Classifier {
 }
 
 object Speech {
-    const val CALL_HINT = "Tap to answer. Double tap to decline."
+    const val CALL_HINT = "Tap to answer."
     const val REPLY_HINT = "Tap to reply."
     const val VOICE_HINT = "Tap to play."
     private const val MAX_BODY = 300
@@ -74,7 +76,12 @@ object Speech {
         "WhatsApp Business ${if (detail == "video") "video call" else "call"} from $sender."
 
     fun replyOption(index: Int, total: Int, text: String): String =
-        "Reply ${index + 1} of $total: $text. Tap to send. Double tap for next."
+        "Reply ${index + 1} of $total: $text. Tap to send."
+
+    fun confirm(text: String): String = "You said: ${text.take(MAX_BODY)}. Tap to send."
+
+    const val NOT_HEARD = "I did not catch that. Tap to try again."
+    const val SPEAK_UNAVAILABLE = "Speaking is not available."
 }
 
 object QuickReplies {

@@ -60,6 +60,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("enable_voice", true)
         set(v) = sp.edit().putBoolean("enable_voice", v).apply()
 
+    /** true = after a message, a tap lets you speak the reply; false = pick a saved quick reply. */
+    var replyDictate: Boolean
+        get() = sp.getBoolean("reply_dictate", true)
+        set(v) = sp.edit().putBoolean("reply_dictate", v).apply()
+
     /** One quick reply per line. */
     var quickReplies: String
         get() = sp.getString("quick_replies", QuickReplies.DEFAULT_RAW) ?: QuickReplies.DEFAULT_RAW

@@ -1,16 +1,19 @@
 package com.glassesalerts
 
+import android.Manifest
 import android.app.ActivityOptions
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
@@ -21,16 +24,19 @@ import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
+import android.util.Log
 import android.view.KeyEvent
 import com.glassesalerts.logic.ActionStateMachine
 import com.glassesalerts.logic.AnnounceFilter
 import com.glassesalerts.logic.ButtonMap
 import com.glassesalerts.logic.Classifier
+import com.glassesalerts.logic.DictationFailure
 import com.glassesalerts.logic.Effect
 import com.glassesalerts.logic.Kind
 import com.glassesalerts.logic.Pending
 import com.glassesalerts.logic.QuickReplies
 import com.glassesalerts.logic.QuietHours
+import com.glassesalerts.logic.ReplyMode
 import com.glassesalerts.logic.Speech
 import java.io.File
 import java.util.Calendar
@@ -39,8 +45,8 @@ import java.util.UUID
 
 /**
  * Reads WhatsApp Business notifications aloud and lets glasses taps (Bluetooth media buttons)
- * answer calls, send quick replies and play voice notes. All the "what does a tap mean" logic is
- * in the logic package; this class only talks to Android.
+ * answer calls, send replies (spoken or quick) and play voice notes. All the "what does a tap
+ * mean" logic is in the logic package; this class only talks to Android.
  */
 class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
@@ -52,14 +58,20 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     private var ttsReady = false
     private var session: MediaSession? = null
     private var player: MediaPlayer? = null
+    private var tone: ToneGenerator? = null
 
     private val filter = AnnounceFilter()
     private var sessionWasActive = false
     private val messageSbns = LinkedHashMap<String, StatusBarNotification>()
     private var ringingKey: String? = null
     private var callActions: Pair<PendingIntent?, PendingIntent?>? = null
-    private var voiceInfo: Pair<String, Long>? = null // package name, time the notification arrived
     private var buttonTestUntil = 0L
+
+    // Voice notes are looked up the moment the notification arrives, so a tap can play at once.
+    private var voiceToken = 0
+    private var voiceFile: File? = null
+    private var voiceSearching = false
+    private var playWhenReady = false
 
     override fun onCreate() {
         super.onCreate()
@@ -68,8 +80,14 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         sm = ActionStateMachine(
             replies = { QuickReplies.parse(prefs.quickReplies) },
             clock = { System.currentTimeMillis() },
+            replyMode = { if (prefs.replyDictate) ReplyMode.DICTATE else ReplyMode.QUICK },
         )
         tts = TextToSpeech(this, this)
+        try {
+            tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
+        } catch (e: Exception) {
+            // no confirmation beep: fine
+        }
         createSession()
     }
 
@@ -120,14 +138,22 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             prefs.includeGroups,
         )
         if (result.kind == Kind.IGNORE) return
-        if (result.kind == Kind.INCOMING_CALL && !prefs.enableCalls) return
+
+        val now = System.currentTimeMillis()
+        logd("posted ${result.kind}, notification is ${now - n.`when`} ms old")
+
+        if (result.kind == Kind.INCOMING_CALL) {
+            if (!prefs.enableCalls) return
+            if (ringingKey == sbn.key) {
+                // The ring notification was updated: pick up the Answer button if it arrived late.
+                if (callActions?.first == null && answer != null) callActions = Pair(answer, decline)
+                return
+            }
+        }
         if (inQuietHours()) return
         if (prefs.onlyWhenBluetooth && !bluetoothAudioConnected()) return
 
-        val now = System.currentTimeMillis()
-        if (result.kind == Kind.INCOMING_CALL) {
-            if (ringingKey == sbn.key) return // ring notification was just updated; already announced
-        } else {
+        if (result.kind != Kind.INCOMING_CALL) {
             // Skip WhatsApp re-posts, old notifications, and our own quick reply echoed back.
             if (!filter.shouldAnnounce(sbn.key, text, n.`when`, now)) return
         }
@@ -149,7 +175,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             Kind.VOICE_NOTE -> {
                 speak(Speech.voiceNote(result.sender))
                 if (prefs.enableVoiceNotes) {
-                    voiceInfo = Pair(pkg, now)
+                    prefetchVoiceNote(pkg, now)
                     handle(sm.onVoiceNote(result.sender))
                 }
             }
@@ -176,19 +202,12 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         for (e in effects) {
             when (e) {
                 is Effect.Speak -> speak(e.text, e.flush)
-                Effect.AnswerCall -> {
-                    val key = ringingKey
-                    fire(callActions?.first, "answer")
-                    // If Android blocked the answer, the ringing notification is still there.
-                    main.postDelayed({
-                        if (key != null && ringingKey == key) {
-                            speak("The call did not connect. Please answer on your phone.", true)
-                        }
-                    }, 5_000L)
-                }
+                Effect.AnswerCall -> answerCall()
                 Effect.DeclineCall -> fire(callActions?.second, "decline")
                 is Effect.SendReply -> sendReply(e.key, e.text)
                 is Effect.PlayVoiceNote -> playVoiceNote()
+                Effect.StartDictation -> startDictation()
+                Effect.CancelDictation -> cancelDictation()
             }
         }
     }
@@ -200,6 +219,18 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             null,
             UUID.randomUUID().toString(),
         )
+    }
+
+    /** Short beep the instant a tap is accepted, before anything slower happens. */
+    private fun ack() {
+        try {
+            tone?.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun logd(msg: String) {
+        Log.d("GlassesAlerts", msg)
     }
 
     private fun repeatRing(key: String, sender: String, detail: String, count: Int) {
@@ -230,9 +261,25 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         return Pair(answer, decline)
     }
 
+    private fun answerCall() {
+        val key = ringingKey
+        val pi = callActions?.first
+        if (pi == null) {
+            speak("I cannot answer this one. Please answer on your phone.", true)
+            return
+        }
+        fire(pi, "answer")
+        // If Android blocked the answer, the ringing notification is still there.
+        main.postDelayed({
+            if (key != null && ringingKey == key) {
+                speak("The call did not connect. Please answer on your phone.", true)
+            }
+        }, 5_000L)
+    }
+
     private fun fire(pi: PendingIntent?, what: String) {
         if (pi == null) {
-            speak("Could not $what the call.")
+            speak("Could not $what the call.", true)
             return
         }
         try {
@@ -245,11 +292,11 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
                 pi.send()
             }
         } catch (e: PendingIntent.CanceledException) {
-            speak("Could not $what the call.")
+            speak("Could not $what the call.", true)
         }
     }
 
-    // ------------------------------------------------------------------ quick replies
+    // ------------------------------------------------------------------ replies
 
     private fun findReplyActions(n: Notification): List<Notification.Action> {
         val all = ArrayList<Notification.Action>()
@@ -266,7 +313,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         val sbn = messageSbns[key]
         filter.noteSentReply(key, text, System.currentTimeMillis())
         val ok = sbn != null && replyViaRemoteInput(sbn.notification, text)
-        speak(if (ok) "Reply sent." else "Could not send the reply.")
+        speak(if (ok) "Reply sent." else "Could not send the reply.", true)
     }
 
     private fun replyViaRemoteInput(n: Notification, text: String): Boolean {
@@ -284,28 +331,83 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         }
     }
 
+    // ------------------------------------------------------------------ spoken replies
+
+    private fun startDictation() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            handle(sm.onDictationFailed(DictationFailure.UNAVAILABLE))
+            return
+        }
+        DictationService.listener = { text, unavailable ->
+            main.post { onDictationOutcome(text, unavailable) }
+        }
+        try {
+            // The beep from the tap is the cue; the service plays a second one when it is listening.
+            startForegroundService(Intent(this, DictationService::class.java))
+        } catch (e: Exception) {
+            logd("could not start dictation: ${e.message}")
+            DictationService.listener = null
+            handle(sm.onDictationFailed(DictationFailure.UNAVAILABLE))
+        }
+    }
+
+    private fun cancelDictation() {
+        DictationService.listener = null
+        stopService(Intent(this, DictationService::class.java))
+    }
+
+    private fun onDictationOutcome(text: String?, unavailable: Boolean) {
+        val effects = when {
+            unavailable -> sm.onDictationFailed(DictationFailure.UNAVAILABLE)
+            text.isNullOrBlank() -> sm.onDictationFailed(DictationFailure.NOTHING_HEARD)
+            else -> sm.onDictationResult(text)
+        }
+        handle(effects)
+        refreshSession()
+    }
+
     // ------------------------------------------------------------------ voice notes
 
-    private fun playVoiceNote() {
-        val info = voiceInfo
-        if (info == null) {
-            speak("No voice message found.")
-            return
-        }
+    private fun prefetchVoiceNote(pkg: String, notifiedAt: Long) {
+        val token = ++voiceToken
+        voiceFile = null
+        playWhenReady = false
         if (!Environment.isExternalStorageManager()) {
-            speak("Please allow all files access in the Glasses Alerts app first.")
+            voiceSearching = false
             return
         }
+        voiceSearching = true
         Thread {
-            val file = VoiceNoteFinder.find(info.first, info.second)
+            val started = System.currentTimeMillis()
+            val f = VoiceNoteFinder.find(pkg, notifiedAt)
             main.post {
-                if (file == null) {
-                    speak("I could not find that voice message. Check that media auto download is on.")
-                } else {
-                    play(file)
+                if (token != voiceToken) return@post
+                voiceSearching = false
+                voiceFile = f
+                logd("voice note ${if (f != null) "found" else "NOT found"} after ${System.currentTimeMillis() - started} ms")
+                if (playWhenReady) {
+                    playWhenReady = false
+                    if (f != null) play(f)
+                    else speak("I could not find that voice message. Check that media auto download is on.", true)
                 }
             }
         }.start()
+    }
+
+    private fun playVoiceNote() {
+        if (!Environment.isExternalStorageManager()) {
+            speak("Please allow all files access in the Glasses Alerts app first.", true)
+            return
+        }
+        val f = voiceFile
+        when {
+            f != null && f.exists() -> play(f) // already found: starts right away
+            voiceSearching -> {
+                playWhenReady = true
+                speak("One moment.", true)
+            }
+            else -> speak("I could not find that voice message. Check that media auto download is on.", true)
+        }
     }
 
     private fun play(file: File) {
@@ -328,14 +430,14 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             mp.setOnErrorListener { m, _, _ ->
                 m.release()
                 if (player === m) player = null
-                speak("Could not play that voice message.")
+                speak("Could not play that voice message.", true)
                 true
             }
             mp.prepare()
             mp.start()
             player = mp
         } catch (e: Exception) {
-            speak("Could not play that voice message.")
+            speak("Could not play that voice message.", true)
         }
     }
 
@@ -348,6 +450,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
                 val ev = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
                 if (ev.action != KeyEvent.ACTION_DOWN) return true // swallow key-up while we are active
+                if (ev.repeatCount > 0) return true
                 ButtonLog.record(ev.keyCode)
                 val testing = System.currentTimeMillis() < buttonTestUntil
                 if (!sm.hasPending()) {
@@ -356,6 +459,9 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
                     return testing
                 }
                 val button = ButtonMap.map(ev.keyCode) ?: return false
+                logd("button ${ev.keyCode} -> $button")
+                ack()          // instant feedback
+                tts?.stop()    // stop whatever was being read so the answer to the tap is heard first
                 handle(sm.onButton(button))
                 refreshSession()
                 return true
@@ -460,9 +566,15 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
 
     override fun onDestroy() {
         instance = null
+        DictationService.listener = null
         main.removeCallbacksAndMessages(null)
         player?.release()
         player = null
+        try {
+            tone?.release()
+        } catch (e: Exception) {
+        }
+        tone = null
         session?.release()
         session = null
         tts?.stop()

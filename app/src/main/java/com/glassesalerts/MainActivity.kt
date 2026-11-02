@@ -1,11 +1,15 @@
 package com.glassesalerts
 
+import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
@@ -32,6 +36,14 @@ class MainActivity : Activity() {
     private lateinit var statusText: TextView
     private lateinit var filesText: TextView
     private lateinit var overlayText: TextView
+    private lateinit var micText: TextView
+    private val ui = Handler(Looper.getMainLooper())
+    private val tick = object : Runnable {
+        override fun run() {
+            updateStatus()
+            ui.postDelayed(this, 1000)
+        }
+    }
     private lateinit var lastButtonText: TextView
     private var testTts: TextToSpeech? = null
     private var testReady = false
@@ -50,6 +62,16 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        ui.post(tick) // keeps the status lines and "last glasses button" up to date
+    }
+
+    override fun onPause() {
+        ui.removeCallbacks(tick)
+        super.onPause()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         updateStatus()
     }
 
@@ -73,6 +95,11 @@ class MainActivity : Activity() {
             "Display over other apps is ON (helps answer calls)."
         } else {
             "Display over other apps is OFF. Answering calls by tap may be blocked (step 4)."
+        }
+        micText.text = if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            "Microphone access is ON (needed for spoken replies)."
+        } else {
+            "Microphone access is OFF. Spoken replies will not work until you allow it (step 5)."
         }
         lastButtonText.text = "Last glasses button: " + ButtonLog.last
     }
@@ -115,9 +142,11 @@ class MainActivity : Activity() {
         statusText = label("")
         filesText = label("")
         overlayText = label("")
+        micText = label("")
         col.addView(statusText)
         col.addView(filesText)
         col.addView(overlayText)
+        col.addView(micText)
 
         col.addView(button("1. Allow notification access") {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -137,7 +166,10 @@ class MainActivity : Activity() {
         col.addView(button("4. Allow display over other apps (for answering calls)") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
-        col.addView(button("5. Test the voice (connect your glasses first)") {
+        col.addView(button("5. Allow microphone (for spoken replies)") {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        })
+        col.addView(button("6. Test the voice (connect your glasses first)") {
             if (testReady) {
                 testTts?.speak(
                     "WhatsApp Business message from Test Customer. Is my order ready?",
@@ -148,7 +180,7 @@ class MainActivity : Activity() {
 
         col.addView(label("Glasses buttons", bold = true, size = 20f))
         col.addView(label("Different glasses send different buttons for a tap. Press the button below, then tap and swipe your glasses. They will say which button they sent."))
-        col.addView(button("6. Test glasses buttons (60 seconds)") {
+        col.addView(button("7. Test glasses buttons (60 seconds)") {
             val svc = AlertListenerService.instance
             if (svc == null) {
                 Toast.makeText(this, "Turn on notification access first (step 1).", Toast.LENGTH_LONG).show()
@@ -158,7 +190,6 @@ class MainActivity : Activity() {
         })
         lastButtonText = label("")
         col.addView(lastButtonText)
-        col.addView(button("Refresh") { updateStatus() })
         col.addView(label("How taps work: tap = answer / reply / play. Double tap forward = decline / next reply. Triple tap = cancel."))
 
         col.addView(label("Features", bold = true, size = 20f))
@@ -169,7 +200,8 @@ class MainActivity : Activity() {
             setOnCheckedChangeListener { _, v -> prefs.enabled = v }
         })
         col.addView(check("Announce calls (tap to answer, double tap to decline)", { prefs.enableCalls }, { prefs.enableCalls = it }))
-        col.addView(check("Quick replies after a message", { prefs.enableReplies }, { prefs.enableReplies = it }))
+        col.addView(check("Reply by speaking (off = pick a saved quick reply)", { prefs.replyDictate }, { prefs.replyDictate = it }))
+        col.addView(check("Offer replies after a message", { prefs.enableReplies }, { prefs.enableReplies = it }))
         col.addView(check("Voice notes: offer to play them", { prefs.enableVoiceNotes }, { prefs.enableVoiceNotes = it }))
 
         col.addView(label("Quick replies (one per line, up to ${QuickReplies.MAX_REPLIES})", bold = true))

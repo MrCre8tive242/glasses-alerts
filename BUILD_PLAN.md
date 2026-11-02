@@ -92,3 +92,20 @@ Verification: logic package 79/79 checks pass (kotlinc 2.0.21). Android files co
 - Exact WhatsApp Business call notification shape (answer intent present?).
 - Voice note folder path on the current WhatsApp Business version.
 - Two voice notes of the same length in a row from one chat are treated as a repeat (text identical). Minor.
+
+## Refinement Log 2 (Sonnet 5.5, after first real-device test)
+Device findings: single tap on Ray-Ban Meta Gen 2 sends MEDIA_NEXT (fixed in the previous commit). Messages, calls and voice notes all reached the app. Complaints: long delay before a voice note plays, late call announcement, slow response after a tap, and a request for spoken replies.
+1. Instant feedback: every accepted tap plays a short beep (ToneGenerator) and cuts off any speech in progress, so the answer to a tap is heard first.
+2. Calls: announcement is one sentence ("...call from X. Tap to answer."). Calls are now announced even if WhatsApp posts the ring notification before attaching its Answer button; the button is picked up when the notification updates.
+3. Voice notes: the file is looked up as soon as the notification arrives (background thread, up to 25 s), so a tap plays it at once. The finder now looks only at the newest 3 week-folders instead of walking the whole tree.
+4. Spoken replies: new `DictationService` (short microphone foreground service plus an invisible 1-pixel overlay, glasses microphone routed when connected, SpeechRecognizer, offline preferred). State machine gained Dictating and Confirm states: tap -> speak -> "You said ... Tap to send" -> tap sends, no tap in 45 s cancels. Falls back to quick replies if speaking is unavailable. Setting: "Reply by speaking" (default on).
+5. Settings screen refreshes itself every second (the "last glasses button" line no longer needs a manual refresh) and has a microphone permission step.
+6. Timing lines are logged under the tag GlassesAlerts (notification age, button codes, voice note search time).
+
+Verification: logic package 102/102 checks pass. Android files are syntax-checked only; never built against the SDK here.
+
+Open risks (need the phone):
+- Background microphone: Android may refuse mic access to a service started from the background. The overlay and foreground service are the workaround; if "I did not catch that" keeps happening, check Logcat for "recognizer error" and "glasses microphone routed".
+- Glasses microphone quality over Bluetooth is lower than the phone mic.
+- Whether the call delay was the late Answer button or Android delaying the notification: Logcat shows "notification is N ms old".
+- Other gestures (double tap, triple tap, swipes) still unmeasured.

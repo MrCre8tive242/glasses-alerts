@@ -4,12 +4,19 @@ package com.glassesalerts.logic
 
 enum class Button { PRIMARY, SECONDARY, CANCEL }
 
+/** What a tap does after a message: speak a reply, or pick one of the saved quick replies. */
+enum class ReplyMode { DICTATE, QUICK }
+
+enum class DictationFailure { NOTHING_HEARD, UNAVAILABLE }
+
 sealed class Effect {
     data class Speak(val text: String, val flush: Boolean = false) : Effect()
     object AnswerCall : Effect()
     object DeclineCall : Effect()
     data class SendReply(val key: String, val text: String) : Effect()
     data class PlayVoiceNote(val sender: String) : Effect()
+    object StartDictation : Effect()
+    object CancelDictation : Effect()
 }
 
 sealed class Pending {
@@ -17,6 +24,8 @@ sealed class Pending {
     data class Message(val sender: String, val key: String) : Pending()
     data class Select(val sender: String, val key: String, val index: Int) : Pending()
     data class Voice(val sender: String) : Pending()
+    data class Dictating(val sender: String, val key: String) : Pending()
+    data class Confirm(val sender: String, val key: String, val text: String) : Pending()
 }
 
 /**
@@ -27,6 +36,7 @@ class ActionStateMachine(
     private val replies: () -> List<String>,
     private val clock: () -> Long,
     private val ttlMs: Long = 45_000L,
+    private val replyMode: () -> ReplyMode = { ReplyMode.QUICK },
 ) {
     private var pending: Pending? = null
     private var since = 0L
@@ -44,19 +54,22 @@ class ActionStateMachine(
         since = clock()
     }
 
+    /** Something the user is in the middle of; a new notification must not take it over. */
+    private fun busy(p: Pending?): Boolean =
+        p is Pending.Call || p is Pending.Select || p is Pending.Dictating || p is Pending.Confirm
+
+    private fun canOffer(): Boolean = replyMode() == ReplyMode.DICTATE || replies().isNotEmpty()
+
     fun onIncomingCall(sender: String, detail: String): List<Effect> {
         set(Pending.Call(sender))
-        return listOf(
-            Effect.Speak(Speech.call(sender, detail), flush = true),
-            Effect.Speak(Speech.CALL_HINT),
-        )
+        // One short sentence, so "tap to answer" is heard as early as possible.
+        return listOf(Effect.Speak(Speech.call(sender, detail) + " " + Speech.CALL_HINT, flush = true))
     }
 
     /** Call this after the message itself has been spoken. */
     fun onMessage(sender: String, key: String, canReply: Boolean): List<Effect> {
-        val cur = current
-        if (cur is Pending.Call || cur is Pending.Select) return emptyList()
-        if (!canReply || replies().isEmpty()) {
+        if (busy(current)) return emptyList()
+        if (!canReply || !canOffer()) {
             set(null)
             return emptyList()
         }
@@ -65,8 +78,7 @@ class ActionStateMachine(
     }
 
     fun onVoiceNote(sender: String): List<Effect> {
-        val cur = current
-        if (cur is Pending.Call || cur is Pending.Select) return emptyList()
+        if (busy(current)) return emptyList()
         set(Pending.Voice(sender))
         return listOf(Effect.Speak(Speech.VOICE_HINT))
     }
@@ -77,6 +89,33 @@ class ActionStateMachine(
 
     fun clear() = set(null)
 
+    /** The speech recognizer produced text. */
+    fun onDictationResult(text: String): List<Effect> {
+        val cur = current as? Pending.Dictating ?: return emptyList()
+        val t = text.trim()
+        if (t.isEmpty()) return onDictationFailed(DictationFailure.NOTHING_HEARD)
+        set(Pending.Confirm(cur.sender, cur.key, t))
+        return listOf(Effect.Speak(Speech.confirm(t), flush = true))
+    }
+
+    fun onDictationFailed(reason: DictationFailure): List<Effect> {
+        val cur = current as? Pending.Dictating ?: return emptyList()
+        if (reason == DictationFailure.NOTHING_HEARD) {
+            set(Pending.Message(cur.sender, cur.key))
+            return listOf(Effect.Speak(Speech.NOT_HEARD, flush = true))
+        }
+        // Speaking is not possible right now (no permission, no recognizer, no network).
+        val list = replies()
+        if (list.isEmpty()) {
+            set(null)
+            return listOf(Effect.Speak(Speech.SPEAK_UNAVAILABLE + " Please reply on your phone.", flush = true))
+        }
+        set(Pending.Select(cur.sender, cur.key, 0))
+        return listOf(
+            Effect.Speak(Speech.SPEAK_UNAVAILABLE + " " + Speech.replyOption(0, list.size, list[0]), flush = true)
+        )
+    }
+
     fun onButton(b: Button): List<Effect> {
         val cur = current ?: return emptyList()
         return when (cur) {
@@ -86,8 +125,9 @@ class ActionStateMachine(
                 Button.CANCEL -> { set(null); emptyList() }
             }
             is Pending.Message -> when (b) {
-                Button.PRIMARY -> select(cur.sender, cur.key, 0)
-                else -> { set(null); emptyList() }
+                Button.PRIMARY -> start(cur.sender, cur.key, replyMode())
+                Button.SECONDARY -> start(cur.sender, cur.key, other(replyMode()))
+                Button.CANCEL -> { set(null); emptyList() }
             }
             is Pending.Select -> when (b) {
                 Button.PRIMARY -> {
@@ -97,7 +137,16 @@ class ActionStateMachine(
                     else listOf(Effect.SendReply(cur.key, list[cur.index.coerceIn(0, list.size - 1)]))
                 }
                 Button.SECONDARY -> select(cur.sender, cur.key, cur.index + 1)
-                Button.CANCEL -> { set(null); listOf(Effect.Speak("Cancelled.")) }
+                Button.CANCEL -> { set(null); listOf(Effect.Speak("Cancelled.", flush = true)) }
+            }
+            is Pending.Dictating -> when (b) {
+                Button.CANCEL -> { set(null); listOf(Effect.CancelDictation) }
+                else -> emptyList() // still listening; ignore stray taps
+            }
+            is Pending.Confirm -> when (b) {
+                Button.PRIMARY -> { set(null); listOf(Effect.SendReply(cur.key, cur.text)) }
+                Button.SECONDARY -> start(cur.sender, cur.key, ReplyMode.DICTATE) // say it again
+                Button.CANCEL -> { set(null); listOf(Effect.Speak("Cancelled.", flush = true)) }
             }
             is Pending.Voice -> {
                 set(null)
@@ -105,6 +154,18 @@ class ActionStateMachine(
             }
         }
     }
+
+    private fun other(m: ReplyMode): ReplyMode =
+        if (m == ReplyMode.DICTATE) ReplyMode.QUICK else ReplyMode.DICTATE
+
+    private fun start(sender: String, key: String, mode: ReplyMode): List<Effect> =
+        when (mode) {
+            ReplyMode.DICTATE -> {
+                set(Pending.Dictating(sender, key))
+                listOf(Effect.StartDictation)
+            }
+            ReplyMode.QUICK -> select(sender, key, 0)
+        }
 
     private fun select(sender: String, key: String, wanted: Int): List<Effect> {
         val list = replies()

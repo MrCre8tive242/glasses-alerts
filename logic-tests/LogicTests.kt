@@ -87,7 +87,7 @@ fun main() {
 
     // call
     val callFx = sm.onIncomingCall("Maria", "voice")
-    check("call announces", callFx.first() == Effect.Speak("WhatsApp Business call from Maria.", flush = true))
+    check("call announces in one sentence", callFx == listOf(Effect.Speak("WhatsApp Business call from Maria. Tap to answer.", flush = true)))
     check("call pending", sm.current is Pending.Call)
     check("call answer", sm.onButton(Button.PRIMARY) == listOf(Effect.AnswerCall))
     check("call cleared after answer", !sm.hasPending())
@@ -114,10 +114,11 @@ fun main() {
 
     sm.onMessage("Maria", "k2", true)
     sm.onButton(Button.PRIMARY)
-    check("cancel in selection", sm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.")) && !sm.hasPending())
+    check("cancel in selection", sm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.", flush = true)) && !sm.hasPending())
 
     sm.onMessage("Maria", "k3", true)
-    check("secondary on message dismisses", sm.onButton(Button.SECONDARY).isEmpty() && !sm.hasPending())
+    check("secondary on message starts the other mode (speaking)", sm.onButton(Button.SECONDARY) == listOf(Effect.StartDictation))
+    sm.clear()
 
     check("cannot reply -> no pending", sm.onMessage("Maria", "k4", canReply = false).isEmpty() && !sm.hasPending())
     replies = emptyList()
@@ -168,6 +169,62 @@ fun main() {
     check("filter reply window ends", f.shouldAnnounce("c1", "Thanks!", 1_040_000, 1_040_100))
     f.forget("c1")
     check("filter forget allows repeat", f.shouldAnnounce("c1", "Thanks!", 1_050_000, 1_050_100))
+
+    // ---- Spoken replies (dictation) ----
+    check("incoming text without answer button", Classifier.classify(Classifier.Input("Maria", "Incoming voice call", isCall = true), false) ==
+        Classified(Kind.INCOMING_CALL, "Maria", "voice"))
+    check("outgoing call ignored", Classifier.classify(Classifier.Input("Maria", "Calling...", isCall = true), false).kind == Kind.IGNORE)
+
+    var mode = ReplyMode.DICTATE
+    replies = listOf("Yes", "No", "Later")
+    val dm = ActionStateMachine({ replies }, { now }, replyMode = { mode })
+    check("dictate: hint offered", dm.onMessage("Maria", "d1", true) == listOf(Effect.Speak(Speech.REPLY_HINT)))
+    check("dictate: tap starts dictation", dm.onButton(Button.PRIMARY) == listOf(Effect.StartDictation) && dm.current is Pending.Dictating)
+    check("dictate: taps ignored while listening", dm.onButton(Button.PRIMARY).isEmpty() && dm.current is Pending.Dictating)
+    check("dictate: message does not hijack", dm.onMessage("Bob", "d2", true).isEmpty() && dm.current is Pending.Dictating)
+    check("dictate: result asks to confirm", dm.onDictationResult("  I will be there at five ") ==
+        listOf(Effect.Speak(Speech.confirm("I will be there at five"), flush = true)))
+    check("dictate: confirm pending", dm.current is Pending.Confirm)
+    check("dictate: message does not hijack confirm", dm.onMessage("Bob", "d3", true).isEmpty() && dm.current is Pending.Confirm)
+    check("dictate: tap sends", dm.onButton(Button.PRIMARY) == listOf(Effect.SendReply("d1", "I will be there at five")) && !dm.hasPending())
+
+    dm.onMessage("Maria", "d4", true); dm.onButton(Button.PRIMARY); dm.onDictationResult("Hello")
+    check("dictate: secondary says it again", dm.onButton(Button.SECONDARY) == listOf(Effect.StartDictation) && dm.current is Pending.Dictating)
+    dm.onDictationResult("Hello again")
+    check("dictate: cancel at confirm", dm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.", flush = true)) && !dm.hasPending())
+
+    dm.onMessage("Maria", "d5", true); dm.onButton(Button.PRIMARY)
+    check("dictate: cancel while listening", dm.onButton(Button.CANCEL) == listOf(Effect.CancelDictation) && !dm.hasPending())
+
+    dm.onMessage("Maria", "d6", true); dm.onButton(Button.PRIMARY)
+    check("dictate: nothing heard offers retry", dm.onDictationFailed(DictationFailure.NOTHING_HEARD) ==
+        listOf(Effect.Speak(Speech.NOT_HEARD, flush = true)) && dm.current is Pending.Message)
+    check("dictate: retry tap listens again", dm.onButton(Button.PRIMARY) == listOf(Effect.StartDictation))
+    check("dictate: blank result counts as not heard", dm.onDictationResult("   ") == listOf(Effect.Speak(Speech.NOT_HEARD, flush = true)))
+    dm.onButton(Button.PRIMARY)
+    check("dictate: unavailable falls back to quick replies", dm.onDictationFailed(DictationFailure.UNAVAILABLE) ==
+        listOf(Effect.Speak(Speech.SPEAK_UNAVAILABLE + " " + Speech.replyOption(0, 3, "Yes"), flush = true)) && dm.current is Pending.Select)
+    dm.clear()
+
+    replies = emptyList()
+    dm.onMessage("Maria", "d7", true)
+    check("dictate: offered even with no quick replies", dm.current is Pending.Message)
+    dm.onButton(Button.PRIMARY)
+    check("dictate: unavailable with no quick replies clears", dm.onDictationFailed(DictationFailure.UNAVAILABLE) ==
+        listOf(Effect.Speak(Speech.SPEAK_UNAVAILABLE + " Please reply on your phone.", flush = true)) && !dm.hasPending())
+    replies = listOf("Yes", "No", "Later")
+
+    check("result ignored when not dictating", dm.onDictationResult("hi").isEmpty())
+
+    dm.onMessage("Maria", "d8", true)
+    check("dictate mode: secondary opens quick replies", dm.onButton(Button.SECONDARY) ==
+        listOf(Effect.Speak(Speech.replyOption(0, 3, "Yes"), flush = true)))
+    dm.clear()
+    mode = ReplyMode.QUICK
+    dm.onMessage("Maria", "d9", true)
+    check("quick mode: tap opens quick replies", dm.onButton(Button.PRIMARY) ==
+        listOf(Effect.Speak(Speech.replyOption(0, 3, "Yes"), flush = true)))
+    dm.clear()
 
     println("$total checks, $failures failed")
     if (failures == 0) println("ALL PASSED") else exitProcess(1)
