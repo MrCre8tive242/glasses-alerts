@@ -4,10 +4,10 @@ Android app that works with the WhatsApp Business app (`com.whatsapp.w4b`) and y
 Meta Ray-Ban glasses, connected over Bluetooth like a headset.
 
 - Reads new messages aloud.
-- Announces incoming calls. Tap your glasses to answer.
-- After a message, tap to speak a reply. The app reads back what it heard, and you tap to send.
+- Announces incoming calls. Double tap your glasses to answer.
+- After a message, double tap to speak a reply. The app reads back what it heard, and you double tap to send.
   (Or switch to saved quick replies in the settings.)
-- Announces voice notes. Tap to play them in your glasses.
+- Announces voice notes. Double tap to play them in your glasses.
 
 ## Build it (Android Studio)
 1. Install Android Studio (free): https://developer.android.com/studio
@@ -37,14 +37,19 @@ Android Studio shows a red error, copy it back to Claude and it will be fixed.
 8. Edit your **quick replies** and tap Save.
 
 ## How taps work
-Ray-Ban Meta touchpad: a single tap is "play/pause", a double tap is "next track" and a
-triple tap is "previous track". Single tap and double tap both do the main action. Triple tap cancels.
-While something is waiting, a tap does this:
-- Call ringing: tap = answer
-- After a message ("Tap to reply"): tap = start speaking your reply (a beep means it is listening)
-- After it reads back what you said ("Tap to send"): tap = send. Do nothing for 45 seconds to cancel.
-- After a voice note ("Tap to play"): tap = play
-- Triple tap: decline a ringing call, or go back one step ("Cancelled. Tap to speak again.")
+On the Ray-Ban Meta Gen 2, the single tap stays inside the glasses and is never sent to the phone
+(measured with the in-app button test). Only the **double tap** (media next) and **triple tap**
+(media previous) reach the app, so those are the controls:
+
+- **Double tap = the main action**
+  - Call ringing: answer
+  - After a message ("Double tap to reply"): start speaking your reply (a beep means it is listening)
+  - After it reads back what you said ("Double tap to send"): send
+  - After a voice note ("Double tap to play"): play
+- **Triple tap = cancel**
+  - Call ringing: decline
+  - After the read-back: "Cancelled. Double tap to speak again."
+- Do nothing for 45 seconds and the offer expires.
 
 Every accepted tap gives an instant short beep.
 Run step 7 to see what each of your gestures actually sends.

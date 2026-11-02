@@ -112,3 +112,7 @@ Open risks (need the phone):
 
 ## Refinement Log 3 (Sonnet 5.5)
 Device finding: only double taps worked. Ray-Ban Meta sends single tap = play/pause (85), double tap = next (87), triple tap = previous (88). The earlier "measured" tap was a double tap, and play/pause had been mapped to cancel. Now: 85/79/126/127/87 = primary, 88/86 = cancel (also declines a ringing call; at "Tap to send" it goes back to "Tap to speak again"), 89/90 = secondary. Still to confirm on the phone: that a single tap really arrives as 85 (use the live "Last glasses button" line).
+
+## Refinement Log 4 (Sonnet 5.5)
+Device finding: with the button test running, only media next (double tap) and media previous (triple tap) reach the phone. The single tap never arrives, so it cannot be used. Prompts now say "Double tap to ..." everywhere; double tap = main action, triple tap = cancel / decline. Play/pause keys stay mapped as primary in case other headsets send them.
+Idea if single tap is wanted later (untested): keep a silent audio stream playing while an offer is pending, so the Bluetooth stack treats the phone as "playing" and may forward the glasses' play/pause.

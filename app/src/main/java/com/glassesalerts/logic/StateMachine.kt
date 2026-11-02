@@ -62,7 +62,7 @@ class ActionStateMachine(
 
     fun onIncomingCall(sender: String, detail: String): List<Effect> {
         set(Pending.Call(sender))
-        // One short sentence, so "tap to answer" is heard as early as possible.
+        // One short sentence, so "double tap to answer" is heard as early as possible.
         return listOf(Effect.Speak(Speech.call(sender, detail) + " " + Speech.CALL_HINT, flush = true))
     }
 
@@ -146,7 +146,7 @@ class ActionStateMachine(
                 Button.PRIMARY -> { set(null); listOf(Effect.SendReply(cur.key, cur.text)) }
                 Button.SECONDARY -> start(cur.sender, cur.key, ReplyMode.DICTATE) // say it again
                 Button.CANCEL -> {
-                    // Back to "Tap to reply" so a mistake can be redone without waiting.
+                    // Back to "Double tap to reply" so a mistake can be redone without waiting.
                     set(Pending.Message(cur.sender, cur.key))
                     listOf(Effect.Speak(Speech.CANCELLED_AGAIN, flush = true))
                 }

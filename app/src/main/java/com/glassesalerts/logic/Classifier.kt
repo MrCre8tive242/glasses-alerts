@@ -61,9 +61,9 @@ object Classifier {
 }
 
 object Speech {
-    const val CALL_HINT = "Tap to answer."
-    const val REPLY_HINT = "Tap to reply."
-    const val VOICE_HINT = "Tap to play."
+    const val CALL_HINT = "Double tap to answer."
+    const val REPLY_HINT = "Double tap to reply."
+    const val VOICE_HINT = "Double tap to play."
     private const val MAX_BODY = 300
 
     fun message(sender: String, body: String, readBody: Boolean): String =
@@ -76,12 +76,12 @@ object Speech {
         "WhatsApp Business ${if (detail == "video") "video call" else "call"} from $sender."
 
     fun replyOption(index: Int, total: Int, text: String): String =
-        "Reply ${index + 1} of $total: $text. Tap to send."
+        "Reply ${index + 1} of $total: $text. Double tap to send."
 
-    fun confirm(text: String): String = "You said: ${text.take(MAX_BODY)}. Tap to send."
+    fun confirm(text: String): String = "You said: ${text.take(MAX_BODY)}. Double tap to send."
 
-    const val CANCELLED_AGAIN = "Cancelled. Tap to speak again."
-    const val NOT_HEARD = "I did not catch that. Tap to try again."
+    const val CANCELLED_AGAIN = "Cancelled. Double tap to speak again."
+    const val NOT_HEARD = "I did not catch that. Double tap to try again."
     const val SPEAK_UNAVAILABLE = "Speaking is not available."
 }
 
@@ -115,11 +115,13 @@ object ButtonMap {
     // 79 HEADSETHOOK, 85 MEDIA_PLAY_PAUSE, 86 MEDIA_STOP, 87 MEDIA_NEXT,
     // 88 MEDIA_PREVIOUS, 89 MEDIA_REWIND, 90 MEDIA_FAST_FORWARD, 126 MEDIA_PLAY, 127 MEDIA_PAUSE
     //
-    // Ray-Ban Meta touchpad: single tap = play/pause, double tap = next track,
-    // triple tap = previous track. Single and double tap both do the main action;
-    // triple tap cancels (or declines a ringing call).
+    // Measured on Ray-Ban Meta Gen 2: only the double tap (MEDIA_NEXT, 87) and the triple tap
+    // (MEDIA_PREVIOUS, 88) reach the phone. The single tap stays inside the glasses.
+    // Double tap = main action. Triple tap = cancel (or decline a ringing call).
+    // The other play/pause style keys are mapped too in case another headset or a firmware
+    // update sends them.
     fun map(keyCode: Int): Button? = when (keyCode) {
-        79, 85, 126, 127, 87 -> Button.PRIMARY
+        87, 79, 85, 126, 127 -> Button.PRIMARY
         89, 90 -> Button.SECONDARY
         88, 86 -> Button.CANCEL
         else -> null

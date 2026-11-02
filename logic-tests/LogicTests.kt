@@ -62,7 +62,7 @@ fun main() {
     check("quiet same-day end exclusive", !QuietHours.contains(14, 12, 14))
     check("quiet start==end off", !QuietHours.contains(5, 5, 5))
 
-    check("single tap (play/pause) is primary", ButtonMap.map(85) == Button.PRIMARY)
+    check("play/pause is primary (not sent by these glasses, kept for other headsets)", ButtonMap.map(85) == Button.PRIMARY)
     check("headset hook is primary", ButtonMap.map(79) == Button.PRIMARY)
     check("play is primary", ButtonMap.map(126) == Button.PRIMARY && ButtonMap.map(127) == Button.PRIMARY)
     check("double tap (next) is primary", ButtonMap.map(87) == Button.PRIMARY)
@@ -89,7 +89,7 @@ fun main() {
 
     // call
     val callFx = sm.onIncomingCall("Maria", "voice")
-    check("call announces in one sentence", callFx == listOf(Effect.Speak("WhatsApp Business call from Maria. Tap to answer.", flush = true)))
+    check("call announces in one sentence", callFx == listOf(Effect.Speak("WhatsApp Business call from Maria. Double tap to answer.", flush = true)))
     check("call pending", sm.current is Pending.Call)
     check("call answer", sm.onButton(Button.PRIMARY) == listOf(Effect.AnswerCall))
     check("call cleared after answer", !sm.hasPending())
