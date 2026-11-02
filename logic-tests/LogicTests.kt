@@ -62,10 +62,11 @@ fun main() {
     check("quiet same-day end exclusive", !QuietHours.contains(14, 12, 14))
     check("quiet start==end off", !QuietHours.contains(5, 5, 5))
 
-    check("button play/pause", ButtonMap.map(85) == Button.PRIMARY)
-    check("button headset hook", ButtonMap.map(79) == Button.PRIMARY)
-    check("button next", ButtonMap.map(87) == Button.SECONDARY)
-    check("button previous", ButtonMap.map(88) == Button.CANCEL)
+    check("button next is primary (measured tap)", ButtonMap.map(87) == Button.PRIMARY)
+    check("button previous is secondary", ButtonMap.map(88) == Button.SECONDARY)
+    check("button play/pause cancels", ButtonMap.map(85) == Button.CANCEL)
+    check("button headset hook cancels", ButtonMap.map(79) == Button.CANCEL)
+    check("button stop cancels", ButtonMap.map(86) == Button.CANCEL)
     check("button unknown", ButtonMap.map(24) == null)
 
     val files = listOf(

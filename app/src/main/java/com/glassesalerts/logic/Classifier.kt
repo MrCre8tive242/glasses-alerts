@@ -106,10 +106,13 @@ object ButtonMap {
     // android.view.KeyEvent codes written as numbers to stay Android-free.
     // 79 HEADSETHOOK, 85 MEDIA_PLAY_PAUSE, 86 MEDIA_STOP, 87 MEDIA_NEXT,
     // 88 MEDIA_PREVIOUS, 126 MEDIA_PLAY, 127 MEDIA_PAUSE
+    //
+    // Measured on Ray-Ban Meta Gen 2: a single tap sends MEDIA_NEXT (87), so that is the
+    // main action. The other gestures are provisional until they are measured.
     fun map(keyCode: Int): Button? = when (keyCode) {
-        79, 85, 126, 127 -> Button.PRIMARY
-        87 -> Button.SECONDARY
-        86, 88 -> Button.CANCEL
+        87 -> Button.PRIMARY
+        88 -> Button.SECONDARY
+        79, 85, 86, 126, 127 -> Button.CANCEL
         else -> null
     }
 }
