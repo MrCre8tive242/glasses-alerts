@@ -109,3 +109,6 @@ Open risks (need the phone):
 - Glasses microphone quality over Bluetooth is lower than the phone mic.
 - Whether the call delay was the late Answer button or Android delaying the notification: Logcat shows "notification is N ms old".
 - Other gestures (double tap, triple tap, swipes) still unmeasured.
+
+## Refinement Log 3 (Sonnet 5.5)
+Device finding: only double taps worked. Ray-Ban Meta sends single tap = play/pause (85), double tap = next (87), triple tap = previous (88). The earlier "measured" tap was a double tap, and play/pause had been mapped to cancel. Now: 85/79/126/127/87 = primary, 88/86 = cancel (also declines a ringing call; at "Tap to send" it goes back to "Tap to speak again"), 89/90 = secondary. Still to confirm on the phone: that a single tap really arrives as 85 (use the live "Last glasses button" line).

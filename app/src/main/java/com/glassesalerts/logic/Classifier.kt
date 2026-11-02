@@ -80,6 +80,7 @@ object Speech {
 
     fun confirm(text: String): String = "You said: ${text.take(MAX_BODY)}. Tap to send."
 
+    const val CANCELLED_AGAIN = "Cancelled. Tap to speak again."
     const val NOT_HEARD = "I did not catch that. Tap to try again."
     const val SPEAK_UNAVAILABLE = "Speaking is not available."
 }
@@ -112,14 +113,15 @@ object QuietHours {
 object ButtonMap {
     // android.view.KeyEvent codes written as numbers to stay Android-free.
     // 79 HEADSETHOOK, 85 MEDIA_PLAY_PAUSE, 86 MEDIA_STOP, 87 MEDIA_NEXT,
-    // 88 MEDIA_PREVIOUS, 126 MEDIA_PLAY, 127 MEDIA_PAUSE
+    // 88 MEDIA_PREVIOUS, 89 MEDIA_REWIND, 90 MEDIA_FAST_FORWARD, 126 MEDIA_PLAY, 127 MEDIA_PAUSE
     //
-    // Measured on Ray-Ban Meta Gen 2: a single tap sends MEDIA_NEXT (87), so that is the
-    // main action. The other gestures are provisional until they are measured.
+    // Ray-Ban Meta touchpad: single tap = play/pause, double tap = next track,
+    // triple tap = previous track. Single and double tap both do the main action;
+    // triple tap cancels (or declines a ringing call).
     fun map(keyCode: Int): Button? = when (keyCode) {
-        87 -> Button.PRIMARY
-        88 -> Button.SECONDARY
-        79, 85, 86, 126, 127 -> Button.CANCEL
+        79, 85, 126, 127, 87 -> Button.PRIMARY
+        89, 90 -> Button.SECONDARY
+        88, 86 -> Button.CANCEL
         else -> null
     }
 }

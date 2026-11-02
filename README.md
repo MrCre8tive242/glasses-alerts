@@ -37,15 +37,16 @@ Android Studio shows a red error, copy it back to Claude and it will be fixed.
 8. Edit your **quick replies** and tap Save.
 
 ## How taps work
-A single tap on the glasses sends "media next". While something is waiting, that tap is the
-main action:
+Ray-Ban Meta touchpad: a single tap is "play/pause", a double tap is "next track" and a
+triple tap is "previous track". Single tap and double tap both do the main action. Triple tap cancels.
+While something is waiting, a tap does this:
 - Call ringing: tap = answer
 - After a message ("Tap to reply"): tap = start speaking your reply (a beep means it is listening)
 - After it reads back what you said ("Tap to send"): tap = send. Do nothing for 45 seconds to cancel.
 - After a voice note ("Tap to play"): tap = play
+- Triple tap: decline a ringing call, or go back one step ("Cancelled. Tap to speak again.")
 
-Every accepted tap gives an instant short beep. Other gestures (previous / play-pause) are
-provisional: previous = say it again or next quick reply, play-pause = cancel.
+Every accepted tap gives an instant short beep.
 Run step 7 to see what each of your gestures actually sends.
 
 ## Spoken replies

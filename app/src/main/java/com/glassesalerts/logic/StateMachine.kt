@@ -121,8 +121,7 @@ class ActionStateMachine(
         return when (cur) {
             is Pending.Call -> when (b) {
                 Button.PRIMARY -> { set(null); listOf(Effect.AnswerCall) }
-                Button.SECONDARY -> { set(null); listOf(Effect.DeclineCall) }
-                Button.CANCEL -> { set(null); emptyList() }
+                Button.SECONDARY, Button.CANCEL -> { set(null); listOf(Effect.DeclineCall) }
             }
             is Pending.Message -> when (b) {
                 Button.PRIMARY -> start(cur.sender, cur.key, replyMode())
@@ -146,7 +145,11 @@ class ActionStateMachine(
             is Pending.Confirm -> when (b) {
                 Button.PRIMARY -> { set(null); listOf(Effect.SendReply(cur.key, cur.text)) }
                 Button.SECONDARY -> start(cur.sender, cur.key, ReplyMode.DICTATE) // say it again
-                Button.CANCEL -> { set(null); listOf(Effect.Speak("Cancelled.", flush = true)) }
+                Button.CANCEL -> {
+                    // Back to "Tap to reply" so a mistake can be redone without waiting.
+                    set(Pending.Message(cur.sender, cur.key))
+                    listOf(Effect.Speak(Speech.CANCELLED_AGAIN, flush = true))
+                }
             }
             is Pending.Voice -> {
                 set(null)

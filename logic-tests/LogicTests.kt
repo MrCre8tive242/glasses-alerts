@@ -62,11 +62,13 @@ fun main() {
     check("quiet same-day end exclusive", !QuietHours.contains(14, 12, 14))
     check("quiet start==end off", !QuietHours.contains(5, 5, 5))
 
-    check("button next is primary (measured tap)", ButtonMap.map(87) == Button.PRIMARY)
-    check("button previous is secondary", ButtonMap.map(88) == Button.SECONDARY)
-    check("button play/pause cancels", ButtonMap.map(85) == Button.CANCEL)
-    check("button headset hook cancels", ButtonMap.map(79) == Button.CANCEL)
-    check("button stop cancels", ButtonMap.map(86) == Button.CANCEL)
+    check("single tap (play/pause) is primary", ButtonMap.map(85) == Button.PRIMARY)
+    check("headset hook is primary", ButtonMap.map(79) == Button.PRIMARY)
+    check("play is primary", ButtonMap.map(126) == Button.PRIMARY && ButtonMap.map(127) == Button.PRIMARY)
+    check("double tap (next) is primary", ButtonMap.map(87) == Button.PRIMARY)
+    check("triple tap (previous) cancels", ButtonMap.map(88) == Button.CANCEL)
+    check("stop cancels", ButtonMap.map(86) == Button.CANCEL)
+    check("fast forward / rewind are secondary", ButtonMap.map(90) == Button.SECONDARY && ButtonMap.map(89) == Button.SECONDARY)
     check("button unknown", ButtonMap.map(24) == null)
 
     val files = listOf(
@@ -96,7 +98,7 @@ fun main() {
     check("call decline", sm.onButton(Button.SECONDARY) == listOf(Effect.DeclineCall))
 
     sm.onIncomingCall("Maria", "voice")
-    check("call cancel does nothing", sm.onButton(Button.CANCEL).isEmpty() && !sm.hasPending())
+    check("call: triple tap declines", sm.onButton(Button.CANCEL) == listOf(Effect.DeclineCall) && !sm.hasPending())
 
     sm.onIncomingCall("Maria", "voice")
     sm.onCallEnded()
@@ -191,7 +193,8 @@ fun main() {
     dm.onMessage("Maria", "d4", true); dm.onButton(Button.PRIMARY); dm.onDictationResult("Hello")
     check("dictate: secondary says it again", dm.onButton(Button.SECONDARY) == listOf(Effect.StartDictation) && dm.current is Pending.Dictating)
     dm.onDictationResult("Hello again")
-    check("dictate: cancel at confirm", dm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.", flush = true)) && !dm.hasPending())
+    check("dictate: cancel at read-back goes back to tap to speak", dm.onButton(Button.CANCEL) == listOf(Effect.Speak(Speech.CANCELLED_AGAIN, flush = true)) && dm.current is Pending.Message)
+    dm.clear()
 
     dm.onMessage("Maria", "d5", true); dm.onButton(Button.PRIMARY)
     check("dictate: cancel while listening", dm.onButton(Button.CANCEL) == listOf(Effect.CancelDictation) && !dm.hasPending())
