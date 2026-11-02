@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.graphics.PixelFormat
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.ToneGenerator
@@ -18,21 +17,18 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
-import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Log
-import android.view.View
-import android.view.WindowManager
 
 /**
  * Listens for one spoken reply using Android's speech recognition, then reports the text back to
  * AlertListenerService. It runs as a short-lived foreground service (microphone type) because
  * Android only lets an app record audio while it is visible or running as one.
  *
- * To work from the background it also shows a 1-pixel invisible overlay (uses the
- * "Display over other apps" permission).
+ * AlertListenerService shows a 1-pixel invisible overlay before starting this service, because
+ * Android only grants the microphone to a foreground service whose app has a visible window.
  *
  * Try 1 uses the glasses microphone (if connected). If the recognizer fails right away (which
  * means a technical problem, not silence), try 2 uses the phone microphone. If that fails right
@@ -42,7 +38,6 @@ class DictationService : Service() {
 
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var overlay: View? = null
     private var tone: ToneGenerator? = null
     private var started = false
     private var finished = false
@@ -55,24 +50,31 @@ class DictationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startAsForeground()
+        val ok = startAsForeground()
         if (!started) {
             started = true
-            begin()
+            if (ok) begin() else finish(null, true)
         }
         return START_NOT_STICKY
     }
 
-    private fun startAsForeground() {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Spoken replies", NotificationManager.IMPORTANCE_LOW)
-        )
-        val n = Notification.Builder(this, CHANNEL)
-            .setContentTitle("Listening for your reply")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .build()
-        startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+    /** False if Android refused (it throws instead of returning, which would crash the whole app). */
+    private fun startAsForeground(): Boolean {
+        return try {
+            val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL, "Spoken replies", NotificationManager.IMPORTANCE_LOW)
+            )
+            val n = Notification.Builder(this, CHANNEL)
+                .setContentTitle("Listening for your reply")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .build()
+            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            true
+        } catch (e: Exception) {
+            DictationLog.record("Android refused the microphone service: ${e.javaClass.simpleName}")
+            false
+        }
     }
 
     private fun begin() {
@@ -87,7 +89,6 @@ class DictationService : Service() {
             return
         }
         DictationLog.record("starting...")
-        addOverlay()
         try {
             tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
         } catch (e: Exception) {
@@ -184,7 +185,6 @@ class DictationService : Service() {
         }
         recognizer = null
         unroute()
-        removeOverlay()
         try {
             tone?.release()
         } catch (e: Exception) {
@@ -246,35 +246,6 @@ class DictationService : Service() {
                 am.stopBluetoothSco()
             }
             am.mode = oldMode
-        } catch (e: Exception) {
-        }
-    }
-
-    // ------------------------------------------------------------------ overlay
-
-    private fun addOverlay() {
-        if (!Settings.canDrawOverlays(this)) return
-        try {
-            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-            val v = View(this)
-            val lp = WindowManager.LayoutParams(
-                1, 1,
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                PixelFormat.TRANSLUCENT,
-            )
-            wm.addView(v, lp)
-            overlay = v
-        } catch (e: Exception) {
-            Log.d(TAG, "overlay failed: ${e.message}")
-        }
-    }
-
-    private fun removeOverlay() {
-        val v = overlay ?: return
-        overlay = null
-        try {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v)
         } catch (e: Exception) {
         }
     }

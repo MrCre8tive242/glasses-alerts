@@ -42,11 +42,11 @@ fun main() {
     check("call blank title", Classifier.classify(Classifier.Input("", "Incoming voice call", isCall = true, hasAnswerAction = true), false).sender == "an unknown caller")
 
     // ---- Speech ----
-    check("speech message", Speech.message("Maria", "Hi", true) == "WhatsApp Business message from Maria. Hi")
-    check("speech message no body", Speech.message("Maria", "Hi", false) == "New WhatsApp Business message from Maria.")
+    check("speech message", Speech.message("Maria", "Hi", true) == "Message from Maria. Hi")
+    check("speech message no body", Speech.message("Maria", "Hi", false) == "New message from Maria.")
     check("speech truncates long body", Speech.message("M", "x".repeat(1000), true).length < 400)
-    check("speech call", Speech.call("Maria", "voice") == "WhatsApp Business call from Maria.")
-    check("speech video call", Speech.call("Maria", "video") == "WhatsApp Business video call from Maria.")
+    check("speech call", Speech.call("Maria", "voice") == "Call from Maria.")
+    check("speech video call", Speech.call("Maria", "video") == "Video call from Maria.")
 
     // ---- QuickReplies / QuietHours / ButtonMap / VoiceNotePicker ----
     check("replies parse trims and drops blanks", QuickReplies.parse(" A \n\n B\n  \nC ") == listOf("A", "B", "C"))
@@ -89,7 +89,7 @@ fun main() {
 
     // call
     val callFx = sm.onIncomingCall("Maria", "voice")
-    check("call announces in one sentence", callFx == listOf(Effect.Speak("WhatsApp Business call from Maria. Double tap to answer.", flush = true)))
+    check("call announces in one sentence", callFx == listOf(Effect.Speak("Call from Maria. Double tap to answer.", flush = true)))
     check("call pending", sm.current is Pending.Call)
     check("call answer", sm.onButton(Button.PRIMARY) == listOf(Effect.AnswerCall))
     check("call cleared after answer", !sm.hasPending())
@@ -116,7 +116,11 @@ fun main() {
 
     sm.onMessage("Maria", "k2", true)
     sm.onButton(Button.PRIMARY)
-    check("cancel in selection", sm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.", flush = true)) && !sm.hasPending())
+    check("triple tap steps to reply 2", sm.onButton(Button.CANCEL) == listOf(Effect.Speak(Speech.replyOption(1, 3, "No"), flush = true)))
+    check("triple tap steps to reply 3", sm.onButton(Button.CANCEL) == listOf(Effect.Speak(Speech.replyOption(2, 3, "Later"), flush = true)))
+    check("triple tap after last cancels", sm.onButton(Button.CANCEL) == listOf(Effect.Speak("Cancelled.", flush = true)) && !sm.hasPending())
+    check("reply prompt mentions next", Speech.replyOption(0, 3, "Yes").endsWith("triple tap for next."))
+    check("last reply prompt mentions cancel", Speech.replyOption(2, 3, "Later").endsWith("triple tap to cancel."))
 
     sm.onMessage("Maria", "k3", true)
     check("secondary on message starts the other mode (speaking)", sm.onButton(Button.SECONDARY) == listOf(Effect.StartDictation))

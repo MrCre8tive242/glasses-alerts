@@ -32,9 +32,12 @@ Android Studio shows a red error, copy it back to Claude and it will be fixed.
    by tap and spoken replies may not start in the background.
 5. Step 5: allow the **Microphone** (only needed for spoken replies).
 6. Connect your glasses and tap step 6 to hear a test message.
-7. Step 7, **Test glasses buttons**: tap and swipe your glasses. They say which button they
-   sent, and the "Last glasses button" line updates by itself.
-8. Edit your **quick replies** and tap Save.
+7. Step 7, **Test spoken reply**: after the second beep say something. The glasses say back what
+   they heard. This runs with the app open, so if it works here but not from a notification,
+   the problem is Android limiting the microphone in the background.
+8. Step 8, **Test glasses buttons**: tap your glasses once, twice and three times. They say which
+   button each sent, and the "Last glasses button" line updates by itself.
+9. Edit your **quick replies** and tap Save.
 
 ## How taps work
 On the Ray-Ban Meta Gen 2, the single tap stays inside the glasses and is never sent to the phone
@@ -46,13 +49,14 @@ On the Ray-Ban Meta Gen 2, the single tap stays inside the glasses and is never 
   - After a message ("Double tap to reply"): start speaking your reply (a beep means it is listening)
   - After it reads back what you said ("Double tap to send"): send
   - After a voice note ("Double tap to play"): play. When it finishes you hear "Double tap to reply".
-- **Triple tap = cancel**
+- **Triple tap = cancel / next**
   - Call ringing: decline
   - After the read-back: "Cancelled. Double tap to speak again."
+  - In the quick-reply list: next reply (after the last one it cancels)
 - Do nothing for 45 seconds and the offer expires.
 
 Every accepted tap gives an instant short beep.
-Run step 7 to see what each of your gestures actually sends.
+Run step 8 to see what each of your gestures actually sends.
 
 ## Spoken replies
 - Speak after the second beep. The app waits for a short pause, then reads back "You said: ...".

@@ -123,3 +123,15 @@ Device findings: (1) a voice note could be played but there was no way to reply 
 2. Dictation: an error within 2.5 s and before any speech is treated as technical, not silence. Try 1 uses the glasses microphone; on a quick failure try 2 uses the phone microphone; a second quick failure reports "unavailable" so the app falls back to quick replies instead of saying "I did not catch that". Removed EXTRA_PREFER_OFFLINE (an offline language pack that is not installed fails immediately). Recognizer is destroyed and recreated per try.
 3. Diagnostics: the settings screen shows "Last spoken reply" (try number, which microphone, error code and name, time in ms). Same line goes to Logcat (tag GlassesAlerts).
 Open: if both tries fail with the same quick error, the likely cause is Android refusing the microphone to a background service (error 7 or 5 within a second). Next step would be a short transparent Activity to record in the foreground.
+
+## Refinement Log 6 (Opus 5.5, full review)
+Review findings and fixes:
+1. **Microphone (likely cause of "mic opens and closes in a second").** Android decides whether a foreground service may use the microphone at the moment it starts, and allows it from the background only when the app has a visible window. The invisible overlay was added after the service started, so it did not count. The overlay is now added by AlertListenerService first, and DictationService starts 250 ms later once the window is up. DictationService no longer manages the overlay.
+2. **Possible crash.** startForeground with the microphone type throws (instead of returning) when Android refuses; that would have crashed the whole app, including notifications. Now caught, logged in "Last spoken reply", and reported as unavailable (falls back to quick replies).
+3. **Quick-reply list was unreachable past reply 1** on these glasses (no "next" gesture). Triple tap now steps to the next reply, and cancels after the last. Prompts say so.
+4. **Settings screen gave wrong gesture instructions** (single tap / double tap forward). Fixed to double / triple tap.
+5. **Shorter spoken prefixes** for less waiting: "Message from X", "Voice message from X", "Call from X. Double tap to answer."
+6. After a spoken reply, media buttons are re-claimed (the microphone switched audio routes), and the read-back waits 300 ms so its start is not cut off.
+7. New **Test spoken reply** button (step 7): listens once with the app in the foreground and says back what it heard. Tells foreground-vs-background microphone problems apart.
+8. Removed a leftover `overlay: View?` field in DictationService whose import had been removed (would not have compiled).
+Verification: logic 108/108 checks pass; Android files syntax-checked and import-checked; still not built against the SDK here.

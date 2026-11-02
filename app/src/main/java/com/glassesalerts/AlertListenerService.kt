@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.RemoteInput
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
@@ -21,10 +22,13 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.view.View
+import android.view.WindowManager
 import android.view.KeyEvent
 import com.glassesalerts.logic.ActionStateMachine
 import com.glassesalerts.logic.AnnounceFilter
@@ -74,6 +78,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     private var playWhenReady = false
     private var voiceSender: String? = null
     private var voiceKey: String? = null
+    private var micOverlay: View? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -340,27 +345,72 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
 
     // ------------------------------------------------------------------ spoken replies
 
+    private fun hasMic(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     private fun startDictation() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (!hasMic()) {
             handle(sm.onDictationFailed(DictationFailure.UNAVAILABLE))
             return
         }
+        launchDictation { text, unavailable -> onDictationOutcome(text, unavailable) }
+    }
+
+    /** Settings-screen test: listen once and say back what was heard. */
+    fun startDictationTest() {
+        if (!hasMic()) {
+            speak("Please allow the microphone first. That is step 5.", true)
+            return
+        }
+        tts?.stop()
+        ack()
+        launchDictation { text, unavailable ->
+            speak(
+                when {
+                    !text.isNullOrBlank() -> "I heard: $text"
+                    unavailable -> "Speaking is not available. Check the last spoken reply line in the app."
+                    else -> "I did not hear anything."
+                },
+                true,
+            )
+        }
+    }
+
+    /**
+     * Starts DictationService. Android decides whether a foreground service may use the
+     * microphone at the moment it starts, and it only allows that for an app with a visible
+     * window. So a 1-pixel invisible overlay ("Display over other apps") goes up first, and the
+     * service is started once that window is showing.
+     */
+    private fun launchDictation(onDone: (String?, Boolean) -> Unit) {
         DictationService.listener = { text, unavailable ->
-            main.post { onDictationOutcome(text, unavailable) }
+            // Short pause so the audio is back on the glasses speaker before anything is said.
+            main.postDelayed({
+                hideMicOverlay()
+                onDone(text, unavailable)
+            }, 300L)
         }
-        try {
-            // The beep from the tap is the cue; the service plays a second one when it is listening.
-            startForegroundService(Intent(this, DictationService::class.java))
-        } catch (e: Exception) {
-            logd("could not start dictation: ${e.message}")
-            DictationService.listener = null
-            handle(sm.onDictationFailed(DictationFailure.UNAVAILABLE))
-        }
+        showMicOverlay()
+        main.postDelayed({
+            if (DictationService.listener == null) {
+                hideMicOverlay() // cancelled while waiting
+            } else {
+                try {
+                    startForegroundService(Intent(this, DictationService::class.java))
+                } catch (e: Exception) {
+                    DictationLog.record("Could not start listening: ${e.javaClass.simpleName}")
+                    val cb = DictationService.listener
+                    DictationService.listener = null
+                    cb?.invoke(null, true)
+                }
+            }
+        }, if (micOverlay != null) 250L else 0L)
     }
 
     private fun cancelDictation() {
         DictationService.listener = null
         stopService(Intent(this, DictationService::class.java))
+        hideMicOverlay()
     }
 
     private fun onDictationOutcome(text: String?, unavailable: Boolean) {
@@ -371,6 +421,35 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         }
         handle(effects)
         refreshSession()
+        // The microphone switched audio routes; make sure the next glasses tap still comes here.
+        if (sm.hasPending()) claimMediaButtons()
+    }
+
+    private fun showMicOverlay() {
+        if (micOverlay != null || !Settings.canDrawOverlays(this)) return
+        try {
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            val v = View(this)
+            val lp = WindowManager.LayoutParams(
+                1, 1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT,
+            )
+            wm.addView(v, lp)
+            micOverlay = v
+        } catch (e: Exception) {
+            logd("overlay failed: ${e.message}")
+        }
+    }
+
+    private fun hideMicOverlay() {
+        val v = micOverlay ?: return
+        micOverlay = null
+        try {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v)
+        } catch (e: Exception) {
+        }
     }
 
     // ------------------------------------------------------------------ voice notes
@@ -587,6 +666,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     override fun onDestroy() {
         instance = null
         DictationService.listener = null
+        hideMicOverlay()
         main.removeCallbacksAndMessages(null)
         player?.release()
         player = null

@@ -93,9 +93,9 @@ class MainActivity : Activity() {
             "All files access is OFF. Voice notes will not play until you allow it (step 3)."
         }
         overlayText.text = if (Settings.canDrawOverlays(this)) {
-            "Display over other apps is ON (helps answer calls)."
+            "Display over other apps is ON (needed to answer calls and for spoken replies)."
         } else {
-            "Display over other apps is OFF. Answering calls by tap may be blocked (step 4)."
+            "Display over other apps is OFF. Answering calls and spoken replies may not work (step 4)."
         }
         micText.text = if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             "Microphone access is ON (needed for spoken replies)."
@@ -139,7 +139,7 @@ class MainActivity : Activity() {
             }
 
         col.addView(label("Glasses Alerts", bold = true, size = 24f))
-        col.addView(label("WhatsApp Business alerts through your Meta Ray-Ban glasses: hear messages, answer calls, send quick replies and play voice notes."))
+        col.addView(label("WhatsApp Business alerts through your Meta Ray-Ban glasses: hear messages, answer calls, reply by voice and play voice notes."))
 
         statusText = label("")
         filesText = label("")
@@ -165,7 +165,7 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             }
         })
-        col.addView(button("4. Allow display over other apps (for answering calls)") {
+        col.addView(button("4. Allow display over other apps (calls and spoken replies)") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
         col.addView(button("5. Allow microphone (for spoken replies)") {
@@ -180,9 +180,18 @@ class MainActivity : Activity() {
             }
         })
 
+        col.addView(button("7. Test spoken reply (speak after the second beep)") {
+            val svc = AlertListenerService.instance
+            if (svc == null) {
+                Toast.makeText(this, "Turn on notification access first (step 1).", Toast.LENGTH_LONG).show()
+            } else {
+                svc.startDictationTest()
+            }
+        })
+
         col.addView(label("Glasses buttons", bold = true, size = 20f))
-        col.addView(label("Different glasses send different buttons for a tap. Press the button below, then tap and swipe your glasses. They will say which button they sent."))
-        col.addView(button("7. Test glasses buttons (60 seconds)") {
+        col.addView(label("Press the button below, then tap your glasses once, twice and three times. They will say which button each one sent."))
+        col.addView(button("8. Test glasses buttons (60 seconds)") {
             val svc = AlertListenerService.instance
             if (svc == null) {
                 Toast.makeText(this, "Turn on notification access first (step 1).", Toast.LENGTH_LONG).show()
@@ -194,7 +203,7 @@ class MainActivity : Activity() {
         col.addView(lastButtonText)
         dictLogText = label("")
         col.addView(dictLogText)
-        col.addView(label("How taps work: tap = answer / reply / play. Double tap forward = decline / next reply. Triple tap = cancel."))
+        col.addView(label("How taps work on Ray-Ban Meta: double tap = answer / reply / send / play. Triple tap = decline a call, cancel, or hear the next quick reply. A single tap is kept by the glasses and never reaches this app."))
 
         col.addView(label("Features", bold = true, size = 20f))
         col.addView(Switch(this).apply {
@@ -203,7 +212,7 @@ class MainActivity : Activity() {
             setPadding(0, pad / 2, 0, pad / 2)
             setOnCheckedChangeListener { _, v -> prefs.enabled = v }
         })
-        col.addView(check("Announce calls (tap to answer, double tap to decline)", { prefs.enableCalls }, { prefs.enableCalls = it }))
+        col.addView(check("Announce calls (double tap to answer, triple tap to decline)", { prefs.enableCalls }, { prefs.enableCalls = it }))
         col.addView(check("Reply by speaking (off = pick a saved quick reply)", { prefs.replyDictate }, { prefs.replyDictate = it }))
         col.addView(check("Offer replies after a message", { prefs.enableReplies }, { prefs.enableReplies = it }))
         col.addView(check("Voice notes: offer to play them", { prefs.enableVoiceNotes }, { prefs.enableVoiceNotes = it }))

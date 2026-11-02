@@ -136,7 +136,12 @@ class ActionStateMachine(
                     else listOf(Effect.SendReply(cur.key, list[cur.index.coerceIn(0, list.size - 1)]))
                 }
                 Button.SECONDARY -> select(cur.sender, cur.key, cur.index + 1)
-                Button.CANCEL -> { set(null); listOf(Effect.Speak("Cancelled.", flush = true)) }
+                Button.CANCEL -> {
+                    // The glasses only send double and triple taps, so triple tap steps through
+                    // the list and cancels after the last reply.
+                    if (cur.index + 1 < replies().size) select(cur.sender, cur.key, cur.index + 1)
+                    else { set(null); listOf(Effect.Speak("Cancelled.", flush = true)) }
+                }
             }
             is Pending.Dictating -> when (b) {
                 Button.CANCEL -> { set(null); listOf(Effect.CancelDictation) }

@@ -67,16 +67,18 @@ object Speech {
     private const val MAX_BODY = 300
 
     fun message(sender: String, body: String, readBody: Boolean): String =
-        if (readBody) "WhatsApp Business message from $sender. ${body.take(MAX_BODY)}"
-        else "New WhatsApp Business message from $sender."
+        if (readBody) "Message from $sender. ${body.take(MAX_BODY)}"
+        else "New message from $sender."
 
-    fun voiceNote(sender: String): String = "WhatsApp Business voice message from $sender."
+    fun voiceNote(sender: String): String = "Voice message from $sender."
 
     fun call(sender: String, detail: String): String =
-        "WhatsApp Business ${if (detail == "video") "video call" else "call"} from $sender."
+        "${if (detail == "video") "Video call" else "Call"} from $sender."
 
+    /** Triple tap moves to the next reply; on the last one it cancels. */
     fun replyOption(index: Int, total: Int, text: String): String =
-        "Reply ${index + 1} of $total: $text. Double tap to send."
+        if (index < total - 1) "Reply ${index + 1} of $total: $text. Double tap to send, triple tap for next."
+        else "Reply ${index + 1} of $total: $text. Double tap to send, triple tap to cancel."
 
     fun confirm(text: String): String = "You said: ${text.take(MAX_BODY)}. Double tap to send."
 
