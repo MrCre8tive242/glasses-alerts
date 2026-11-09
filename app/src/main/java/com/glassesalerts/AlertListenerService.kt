@@ -173,11 +173,13 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
                 repeatRing(sbn.key, result.sender, result.detail, 0)
             }
             Kind.MESSAGE -> {
-                speak(Speech.message(result.sender, result.detail, prefs.readMessageBody))
+                val tapToPlay = prefs.tapToPlayMessages && prefs.readMessageBody
+                speak(Speech.message(result.sender, result.detail, prefs.readMessageBody && !tapToPlay))
                 messageSbns[sbn.key] = sbn
                 while (messageSbns.size > 20) messageSbns.remove(messageSbns.keys.first())
                 val canReply = prefs.enableReplies && findReplyActions(n).isNotEmpty()
-                handle(sm.onMessage(result.sender, sbn.key, canReply))
+                if (tapToPlay) handle(sm.onMessageToPlay(result.sender, sbn.key, result.detail, canReply))
+                else handle(sm.onMessage(result.sender, sbn.key, canReply))
             }
             Kind.VOICE_NOTE -> {
                 speak(Speech.voiceNote(result.sender))
@@ -224,7 +226,21 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         }
     }
 
+    /** Applies the voice, speed and pitch chosen in the app, so changes take effect at once. */
+    private fun applyVoice() {
+        val t = tts ?: return
+        try {
+            t.setSpeechRate(prefs.ttsRate)
+            t.setPitch(prefs.ttsPitch)
+            val name = prefs.ttsVoice
+            if (name.isNotEmpty()) t.voices?.firstOrNull { it.name == name }?.let { t.voice = it }
+        } catch (e: Exception) {
+            logd("voice setup failed: ${e.message}")
+        }
+    }
+
     private fun speak(text: String, flush: Boolean = false) {
+        applyVoice()
         tts?.speak(
             text,
             if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD,

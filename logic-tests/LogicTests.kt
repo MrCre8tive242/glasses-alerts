@@ -233,6 +233,18 @@ fun main() {
         listOf(Effect.Speak(Speech.replyOption(0, 3, "Yes"), flush = true)))
     dm.clear()
 
+    // tap-to-play messages
+    dm.clear()
+    check("play hint", dm.onMessageToPlay("Maria", "p1", "Long text", true) == listOf(Effect.Speak(Speech.PLAY_HINT)))
+    check("tap plays text then offers reply", dm.onButton(Button.PRIMARY) ==
+        listOf(Effect.Speak("Long text", flush = true), Effect.Speak(Speech.REPLY_HINT)) && dm.current is Pending.Message)
+    check("second tap starts dictation", dm.onButton(Button.PRIMARY) == listOf(Effect.StartDictation))
+    dm.clear()
+    dm.onMessageToPlay("Maria", "p2", "Hi", true)
+    check("triple tap skips", dm.onButton(Button.CANCEL).isEmpty() && !dm.hasPending())
+    dm.onMessageToPlay("Maria", "p3", "Hi", false)
+    check("no reply: plays then clears", dm.onButton(Button.PRIMARY) == listOf(Effect.Speak("Hi", flush = true)) && !dm.hasPending())
+
     println("$total checks, $failures failed")
     if (failures == 0) println("ALL PASSED") else exitProcess(1)
 }
