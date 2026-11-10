@@ -88,12 +88,12 @@ class MainActivity : Activity() {
             return
         }
         val lang = Locale.getDefault().language
-        val voices = all.filter { it.locale.language == lang && !it.features.contains("notInstalled") }
+        val voices = all.filter { it.locale.language == lang && !it.features.contains("notInstalled") &&
+            !it.isNetworkConnectionRequired } // online-only voices go silent without signal
             .sortedWith(compareByDescending<android.speech.tts.Voice> { it.quality }.thenBy { it.name })
             .ifEmpty { all.sortedBy { it.name } }
         val names = arrayOf("Phone default") + voices.mapIndexed { i, v ->
-            "Voice ${i + 1}: ${v.locale.displayName}" + (if (v.quality >= android.speech.tts.Voice.QUALITY_HIGH) " (higher quality)" else "") +
-                (if (v.isNetworkConnectionRequired) " (online)" else "")
+            "Voice ${i + 1}: ${v.locale.displayName}" + (if (v.quality >= android.speech.tts.Voice.QUALITY_HIGH) " (higher quality)" else "")
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("Choose a voice (it plays a sample)")

@@ -235,6 +235,7 @@ fun main() {
 
     // tap-to-play messages
     dm.clear()
+    mode = ReplyMode.DICTATE
     check("play hint", dm.onMessageToPlay("Maria", "p1", "Long text", true) == listOf(Effect.Speak(Speech.PLAY_HINT)))
     check("tap plays text then offers reply", dm.onButton(Button.PRIMARY) ==
         listOf(Effect.Speak("Long text", flush = true), Effect.Speak(Speech.REPLY_HINT)) && dm.current is Pending.Message)
@@ -244,6 +245,9 @@ fun main() {
     check("triple tap skips", dm.onButton(Button.CANCEL).isEmpty() && !dm.hasPending())
     dm.onMessageToPlay("Maria", "p3", "Hi", false)
     check("no reply: plays then clears", dm.onButton(Button.PRIMARY) == listOf(Effect.Speak("Hi", flush = true)) && !dm.hasPending())
+
+    check("played text is not cut at 300", Speech.body("a".repeat(900)).length == 900)
+    check("announced text is still capped", Speech.message("M", "a".repeat(900), true).length < 400)
 
     println("$total checks, $failures failed")
     if (failures == 0) println("ALL PASSED") else exitProcess(1)
