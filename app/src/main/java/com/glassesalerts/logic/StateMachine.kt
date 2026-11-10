@@ -22,6 +22,8 @@ sealed class Effect {
 sealed class Pending {
     data class Call(val sender: String) : Pending()
     data class Message(val sender: String, val key: String) : Pending()
+    /** A message was announced by sender only; double tap plays its text. */
+    data class Unread(val sender: String, val key: String, val body: String, val canReply: Boolean) : Pending()
     data class Select(val sender: String, val key: String, val index: Int) : Pending()
     data class Voice(val sender: String) : Pending()
     data class Dictating(val sender: String, val key: String) : Pending()
@@ -77,6 +79,13 @@ class ActionStateMachine(
         return listOf(Effect.Speak(Speech.REPLY_HINT))
     }
 
+    /** Sender-only announcement was spoken; wait for a double tap to read the text aloud. */
+    fun onMessageToPlay(sender: String, key: String, body: String, canReply: Boolean): List<Effect> {
+        if (busy(current)) return emptyList()
+        set(Pending.Unread(sender, key, body, canReply && canOffer()))
+        return listOf(Effect.Speak(Speech.PLAY_HINT))
+    }
+
     fun onVoiceNote(sender: String): List<Effect> {
         if (busy(current)) return emptyList()
         set(Pending.Voice(sender))
@@ -127,6 +136,19 @@ class ActionStateMachine(
                 Button.PRIMARY -> start(cur.sender, cur.key, replyMode())
                 Button.SECONDARY -> start(cur.sender, cur.key, other(replyMode()))
                 Button.CANCEL -> { set(null); emptyList() }
+            }
+            is Pending.Unread -> when (b) {
+                Button.PRIMARY -> {
+                    val spoken = Effect.Speak(Speech.body(cur.body), flush = true)
+                    if (cur.canReply) {
+                        set(Pending.Message(cur.sender, cur.key))
+                        listOf(spoken, Effect.Speak(Speech.REPLY_HINT))
+                    } else {
+                        set(null)
+                        listOf(spoken)
+                    }
+                }
+                else -> { set(null); emptyList() }
             }
             is Pending.Select -> when (b) {
                 Button.PRIMARY -> {

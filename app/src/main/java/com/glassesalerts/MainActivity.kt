@@ -17,6 +17,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
@@ -56,9 +57,52 @@ class MainActivity : Activity() {
             if (status == TextToSpeech.SUCCESS) {
                 testTts?.language = Locale.getDefault()
                 testReady = true
+                applyTestVoice()
             }
         }
         setContentView(buildUi())
+    }
+
+    private fun applyTestVoice() {
+        val t = testTts ?: return
+        try {
+            t.setSpeechRate(prefs.ttsRate)
+            t.setPitch(prefs.ttsPitch)
+            val name = prefs.ttsVoice
+            if (name.isNotEmpty()) t.voices?.firstOrNull { it.name == name }?.let { t.voice = it }
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun sampleVoice() {
+        if (!testReady) return
+        applyTestVoice()
+        testTts?.speak("Message from Test Customer. Is my order ready?", TextToSpeech.QUEUE_FLUSH, null, "sample")
+    }
+
+    private fun chooseVoice() {
+        val t = testTts
+        val all = try { t?.voices?.toList() } catch (e: Exception) { null }
+        if (!testReady || all.isNullOrEmpty()) {
+            Toast.makeText(this, "Voices are not ready yet. Try again in a moment.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val lang = Locale.getDefault().language
+        val voices = all.filter { it.locale.language == lang && !it.features.contains("notInstalled") &&
+            !it.isNetworkConnectionRequired } // online-only voices go silent without signal
+            .sortedWith(compareByDescending<android.speech.tts.Voice> { it.quality }.thenBy { it.name })
+            .ifEmpty { all.sortedBy { it.name } }
+        val names = arrayOf("Phone default") + voices.mapIndexed { i, v ->
+            "Voice ${i + 1}: ${v.locale.displayName}" + (if (v.quality >= android.speech.tts.Voice.QUALITY_HIGH) " (higher quality)" else "")
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Choose a voice (it plays a sample)")
+            .setItems(names) { _, which ->
+                prefs.ttsVoice = if (which == 0) "" else voices[which - 1].name
+                if (which == 0) try { t?.setVoice(t.defaultVoice) } catch (e: Exception) {}
+                sampleVoice()
+            }
+            .show()
     }
 
     override fun onResume() {
@@ -173,10 +217,7 @@ class MainActivity : Activity() {
         })
         col.addView(button("6. Test the voice (connect your glasses first)") {
             if (testReady) {
-                testTts?.speak(
-                    "WhatsApp Business message from Test Customer. Is my order ready?",
-                    TextToSpeech.QUEUE_FLUSH, null, "test"
-                )
+                sampleVoice()
             }
         })
 
@@ -186,6 +227,35 @@ class MainActivity : Activity() {
                 Toast.makeText(this, "Turn on notification access first (step 1).", Toast.LENGTH_LONG).show()
             } else {
                 svc.startDictationTest()
+            }
+        })
+
+        col.addView(label("Voice", bold = true, size = 20f))
+        col.addView(label("If the voice sounds robotic, pick a higher quality one, or install better voices in Android's text-to-speech settings (Google or Samsung engines have natural voices)."))
+        col.addView(button("Choose voice") { chooseVoice() })
+        fun slider(title: String, min: Float, max: Float, get: () -> Float, set: (Float) -> Unit): View {
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            box.addView(label(title))
+            box.addView(android.widget.SeekBar(this).apply {
+                this.max = 100
+                progress = (((get() - min) / (max - min)) * 100).toInt()
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                        if (fromUser) set(min + (max - min) * p / 100f)
+                    }
+                    override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+                    override fun onStopTrackingTouch(s: android.widget.SeekBar?) { sampleVoice() }
+                })
+            })
+            return box
+        }
+        col.addView(slider("Speed (left slower, right faster)", 0.5f, 2.0f, { prefs.ttsRate }, { prefs.ttsRate = it }))
+        col.addView(slider("Pitch (left deeper, right higher)", 0.5f, 1.5f, { prefs.ttsPitch }, { prefs.ttsPitch = it }))
+        col.addView(button("Open Android voice settings (install better voices)") {
+            try {
+                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+            } catch (e: Exception) {
+                startActivity(Intent(Settings.ACTION_SETTINGS))
             }
         })
 
@@ -232,6 +302,7 @@ class MainActivity : Activity() {
         })
 
         col.addView(label("Other settings", bold = true, size = 20f))
+        col.addView(check("Messages: say who it is from, double tap to hear the text (off = read it straight away)", { prefs.tapToPlayMessages }, { prefs.tapToPlayMessages = it }))
         col.addView(check("Read the message text (off = only say who it is from)", { prefs.readMessageBody }, { prefs.readMessageBody = it }))
         col.addView(check("Only speak when Bluetooth audio (glasses) is connected", { prefs.onlyWhenBluetooth }, { prefs.onlyWhenBluetooth = it }))
         col.addView(check("Include group chats", { prefs.includeGroups }, { prefs.includeGroups = it }))
