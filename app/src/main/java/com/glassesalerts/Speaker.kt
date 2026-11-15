@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -46,6 +48,8 @@ class Speaker(context: Context, private val prefs: Prefs) {
     private var waiting: CountDownLatch? = null
     private var waitingId: String? = null
 
+    private val main = Handler(Looper.getMainLooper())
+    private var engine: String? = null
     private var appliedVoice: String? = null
     private var appliedRate = -1f
     private var appliedPitch = -1f
@@ -56,11 +60,18 @@ class Speaker(context: Context, private val prefs: Prefs) {
         .build()
 
     init {
-        tts = TextToSpeech(app) { status ->
+        createTts(null)
+        worker.execute { trimCache() }
+    }
+
+    /** Connects to the phone's current voice engine; `then` runs once it is ready. */
+    private fun createTts(then: (() -> Unit)?) {
+        var t: TextToSpeech? = null
+        t = TextToSpeech(app) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
-                tts?.setAudioAttributes(attrs)
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                t?.language = Locale.getDefault()
+                t?.setAudioAttributes(attrs)
+                t?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(id: String?) {}
                     override fun onDone(id: String?) = release(id)
                     @Deprecated("Deprecated in Java")
@@ -68,10 +79,12 @@ class Speaker(context: Context, private val prefs: Prefs) {
                     override fun onError(id: String?, code: Int) = release(id)
                     override fun onStop(id: String?, interrupted: Boolean) = release(id)
                 })
+                engine = try { t?.defaultEngine } catch (e: Exception) { null }
                 ready = true
+                then?.invoke()
             }
         }
-        worker.execute { trimCache() }
+        tts = t
     }
 
     /** Voices installed on the phone (for the picker). */
@@ -153,6 +166,24 @@ class Speaker(context: Context, private val prefs: Prefs) {
     }
 
     private fun speakOnPhone(text: String, id: String) {
+        // The app connects to one voice engine when it starts. If a different engine was made the
+        // phone's preferred one since then, reconnect so the new voice is used without a restart.
+        val old = tts
+        val now = try { old?.defaultEngine } catch (e: Exception) { null }
+        if (old != null && now != null && engine != null && now != engine) {
+            engine = now // so only the first call reconnects
+            main.post {
+                try {
+                    old.shutdown()
+                } catch (e: Exception) {
+                }
+                appliedVoice = null
+                appliedRate = -1f
+                appliedPitch = -1f
+                createTts { speakOnPhone(text, id) }
+            }
+            return
+        }
         applyPhoneVoice()
         val r = tts?.speak(text, TextToSpeech.QUEUE_ADD, null as Bundle?, id)
         if (r != TextToSpeech.SUCCESS) release(id)
