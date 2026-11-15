@@ -69,4 +69,41 @@ class Prefs(context: Context) {
     var quickReplies: String
         get() = sp.getString("quick_replies", QuickReplies.DEFAULT_RAW) ?: QuickReplies.DEFAULT_RAW
         set(v) = sp.edit().putString("quick_replies", v).apply()
+
+    /** true = say "Message from X" and wait for a double tap to play it; false = read it straight away. */
+    var tapToPlayMessages: Boolean
+        get() = sp.getBoolean("tap_to_play", true)
+        set(v) = sp.edit().putBoolean("tap_to_play", v).apply()
+
+    /** Name of the chosen text-to-speech voice, or empty for the phone's default. */
+    var ttsVoice: String
+        get() = sp.getString("tts_voice", "") ?: ""
+        set(v) = sp.edit().putString("tts_voice", v).apply()
+
+    /** 0.5 (slow) to 2.0 (fast). */
+    var ttsRate: Float
+        get() = sp.getFloat("tts_rate", 1.0f)
+        set(v) = sp.edit().putFloat("tts_rate", v.coerceIn(0.5f, 2.0f)).apply()
+
+    var ttsPitch: Float
+        get() = sp.getFloat("tts_pitch", 1.0f)
+        set(v) = sp.edit().putFloat("tts_pitch", v.coerceIn(0.5f, 1.5f)).apply()
+
+    /** Speak with an ElevenLabs voice over the internet; the phone voice is the fallback. */
+    var elevenEnabled: Boolean
+        get() = sp.getBoolean("eleven_enabled", false)
+        set(v) = sp.edit().putBoolean("eleven_enabled", v).apply()
+
+    /** Stored only on this phone (app backup is off). */
+    var elevenApiKey: String
+        get() = sp.getString("eleven_key", "") ?: ""
+        set(v) = sp.edit().putString("eleven_key", v.trim()).apply()
+
+    var elevenVoiceId: String
+        get() = sp.getString("eleven_voice_id", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice_id", v).apply()
+
+    var elevenVoiceName: String
+        get() = sp.getString("eleven_voice_name", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice_name", v).apply()
 }

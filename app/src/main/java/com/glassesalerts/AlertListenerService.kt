@@ -25,7 +25,6 @@ import android.os.Looper
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
@@ -44,22 +43,19 @@ import com.glassesalerts.logic.ReplyMode
 import com.glassesalerts.logic.Speech
 import java.io.File
 import java.util.Calendar
-import java.util.Locale
-import java.util.UUID
 
 /**
  * Reads WhatsApp Business notifications aloud and lets glasses taps (Bluetooth media buttons)
  * answer calls, send replies (spoken or quick) and play voice notes. All the "what does a tap
  * mean" logic is in the logic package; this class only talks to Android.
  */
-class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitListener {
+class AlertListenerService : NotificationListenerService() {
 
     private val main = Handler(Looper.getMainLooper())
     private lateinit var prefs: Prefs
     private lateinit var sm: ActionStateMachine
 
-    private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private var speaker: Speaker? = null
     private var session: MediaSession? = null
     private var player: MediaPlayer? = null
     private var tone: ToneGenerator? = null
@@ -79,6 +75,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     private var voiceSender: String? = null
     private var voiceKey: String? = null
     private var micOverlay: View? = null
+    private val expiryCheck = Runnable { refreshSession() }
 
     override fun onCreate() {
         super.onCreate()
@@ -89,7 +86,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             clock = { System.currentTimeMillis() },
             replyMode = { if (prefs.replyDictate) ReplyMode.DICTATE else ReplyMode.QUICK },
         )
-        tts = TextToSpeech(this, this)
+        speaker = Speaker(this, prefs)
         try {
             tone = ToneGenerator(AudioManager.STREAM_MUSIC, 90)
         } catch (e: Exception) {
@@ -98,23 +95,10 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         createSession()
     }
 
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale.getDefault()
-            tts?.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            ttsReady = true
-        }
-    }
-
     // ------------------------------------------------------------------ notifications
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!prefs.enabled || !ttsReady) return
+        if (!prefs.enabled || speaker?.ready != true) return
 
         val pkg = sbn.packageName
         val watched = pkg == BUSINESS_PKG || (prefs.includeRegularWhatsApp && pkg == REGULAR_PKG)
@@ -173,11 +157,13 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
                 repeatRing(sbn.key, result.sender, result.detail, 0)
             }
             Kind.MESSAGE -> {
-                speak(Speech.message(result.sender, result.detail, prefs.readMessageBody))
+                val tapToPlay = prefs.tapToPlayMessages && prefs.readMessageBody
+                speak(Speech.message(result.sender, result.detail, prefs.readMessageBody && !tapToPlay))
                 messageSbns[sbn.key] = sbn
                 while (messageSbns.size > 20) messageSbns.remove(messageSbns.keys.first())
                 val canReply = prefs.enableReplies && findReplyActions(n).isNotEmpty()
-                handle(sm.onMessage(result.sender, sbn.key, canReply))
+                if (tapToPlay) handle(sm.onMessageToPlay(result.sender, sbn.key, result.detail, canReply))
+                else handle(sm.onMessage(result.sender, sbn.key, canReply))
             }
             Kind.VOICE_NOTE -> {
                 speak(Speech.voiceNote(result.sender))
@@ -193,8 +179,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             }
             Kind.IGNORE -> Unit
         }
-        refreshSession()
-        main.postDelayed({ refreshSession() }, 46_000L)
+        refreshSessionAndExpiry()
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -225,12 +210,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     }
 
     private fun speak(text: String, flush: Boolean = false) {
-        tts?.speak(
-            text,
-            if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD,
-            null,
-            UUID.randomUUID().toString(),
-        )
+        speaker?.speak(text, flush)
     }
 
     /** Short beep the instant a tap is accepted, before anything slower happens. */
@@ -362,7 +342,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             speak("Please allow the microphone first. That is step 5.", true)
             return
         }
-        tts?.stop()
+        speaker?.stop()
         ack()
         launchDictation { text, unavailable ->
             speak(
@@ -420,7 +400,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
             else -> sm.onDictationResult(text)
         }
         handle(effects)
-        refreshSession()
+        refreshSessionAndExpiry()
         // The microphone switched audio routes; make sure the next glasses tap still comes here.
         if (sm.hasPending()) claimMediaButtons()
     }
@@ -499,7 +479,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
     private fun play(file: File) {
         player?.release()
         player = null
-        tts?.stop()
+        speaker?.stop()
         try {
             val mp = MediaPlayer()
             mp.setAudioAttributes(
@@ -536,8 +516,7 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         val sbn = messageSbns[key] ?: return
         val canReply = prefs.enableReplies && findReplyActions(sbn.notification).isNotEmpty()
         handle(sm.onMessage(sender, key, canReply))
-        refreshSession()
-        main.postDelayed({ refreshSession() }, 46_000L)
+        refreshSessionAndExpiry()
     }
 
     // ------------------------------------------------------------------ glasses buttons
@@ -560,13 +539,23 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
                 val button = ButtonMap.map(ev.keyCode) ?: return false
                 logd("button ${ev.keyCode} -> $button")
                 ack()          // instant feedback
-                tts?.stop()    // stop whatever was being read so the answer to the tap is heard first
+                speaker?.stop()    // stop whatever was being read so the answer to the tap is heard first
                 handle(sm.onButton(button))
-                refreshSession()
+                refreshSessionAndExpiry()
                 return true
             }
         })
         session = s
+    }
+
+    /**
+     * Refresh now, and again just after the waiting action expires, so the glasses buttons go
+     * back to the music app instead of the first tap after expiry being swallowed.
+     */
+    private fun refreshSessionAndExpiry() {
+        refreshSession()
+        main.removeCallbacks(expiryCheck)
+        if (sm.hasPending()) main.postDelayed(expiryCheck, 46_000L)
     }
 
     /** Only claim the media buttons while an action is waiting (or during the button test). */
@@ -677,9 +666,8 @@ class AlertListenerService : NotificationListenerService(), TextToSpeech.OnInitL
         tone = null
         session?.release()
         session = null
-        tts?.stop()
-        tts?.shutdown()
-        tts = null
+        speaker?.shutdown()
+        speaker = null
         super.onDestroy()
     }
 

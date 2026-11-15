@@ -64,11 +64,17 @@ object Speech {
     const val CALL_HINT = "Double tap to answer."
     const val REPLY_HINT = "Double tap to reply."
     const val VOICE_HINT = "Double tap to play."
+    const val PLAY_HINT = "Double tap to play."
     private const val MAX_BODY = 300
+    // A message the user asked to hear is read in full (a tap stops it); the engine's limit is 4000.
+    private const val MAX_PLAYED_BODY = 3000
 
     fun message(sender: String, body: String, readBody: Boolean): String =
         if (readBody) "Message from $sender. ${body.take(MAX_BODY)}"
         else "New message from $sender."
+
+    /** Just the text, for when the user asked to hear it. */
+    fun body(body: String): String = body.take(MAX_PLAYED_BODY)
 
     fun voiceNote(sender: String): String = "Voice message from $sender."
 

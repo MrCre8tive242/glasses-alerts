@@ -3,7 +3,8 @@
 Android app that works with the WhatsApp Business app (`com.whatsapp.w4b`) and your
 Meta Ray-Ban glasses, connected over Bluetooth like a headset.
 
-- Reads new messages aloud.
+- Says who a new message is from. Double tap to hear it (or set it to read every message straight away).
+- Choose the voice, speed and pitch in the app's Voice section.
 - Announces incoming calls. Double tap your glasses to answer.
 - After a message, double tap to speak a reply. The app reads back what it heard, and you double tap to send.
   (Or switch to saved quick replies in the settings.)
@@ -46,6 +47,7 @@ On the Ray-Ban Meta Gen 2, the single tap stays inside the glasses and is never 
 
 - **Double tap = the main action**
   - Call ringing: answer
+  - After "Message from ... Double tap to play": read the message, then offer a reply
   - After a message ("Double tap to reply"): start speaking your reply (a beep means it is listening)
   - After it reads back what you said ("Double tap to send"): send
   - After a voice note ("Double tap to play"): play. When it finishes you hear "Double tap to reply".
