@@ -12,7 +12,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Environment
 import android.provider.Settings
-import android.speech.tts.TextToSpeech
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
@@ -47,43 +46,72 @@ class MainActivity : Activity() {
         }
     }
     private lateinit var lastButtonText: TextView
-    private var testTts: TextToSpeech? = null
-    private var testReady = false
+    private var speaker: Speaker? = null
+    private lateinit var elevenText: TextView
+    private lateinit var elevenSwitch: CheckBox
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        testTts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                testTts?.language = Locale.getDefault()
-                testReady = true
-                applyTestVoice()
-            }
-        }
+        speaker = Speaker(this, prefs)
         setContentView(buildUi())
     }
 
-    private fun applyTestVoice() {
-        val t = testTts ?: return
-        try {
-            t.setSpeechRate(prefs.ttsRate)
-            t.setPitch(prefs.ttsPitch)
-            val name = prefs.ttsVoice
-            if (name.isNotEmpty()) t.voices?.firstOrNull { it.name == name }?.let { t.voice = it }
-        } catch (e: Exception) {
-        }
+    private fun sampleVoice() {
+        if (speaker?.ready != true) return
+        speaker?.speak("Message from Test Customer. Is my order ready?", true)
+        // If ElevenLabs was used and failed, the phone voice spoke instead: say why on screen.
+        if (prefs.elevenEnabled) ui.postDelayed({
+            Speaker.lastError?.let { Toast.makeText(this, "$it. The phone voice was used.", Toast.LENGTH_LONG).show() }
+        }, 6_000L)
     }
 
-    private fun sampleVoice() {
-        if (!testReady) return
-        applyTestVoice()
-        testTts?.speak("Message from Test Customer. Is my order ready?", TextToSpeech.QUEUE_FLUSH, null, "sample")
+    private fun elevenStatus(): String = when {
+        prefs.elevenApiKey.isBlank() -> "ElevenLabs: no API key saved yet."
+        prefs.elevenVoiceId.isBlank() -> "ElevenLabs: key saved. Now choose a voice."
+        else -> "ElevenLabs voice: ${prefs.elevenVoiceName}" + if (prefs.elevenEnabled) "" else " (switched off)"
+    }
+
+    private fun chooseElevenVoice() {
+        val key = prefs.elevenApiKey
+        if (key.isBlank()) {
+            Toast.makeText(this, "Paste your ElevenLabs API key and tap Save key first.", Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, "Loading your ElevenLabs voices...", Toast.LENGTH_SHORT).show()
+        Thread {
+            val result = try {
+                Result.success(Speaker.elevenVoices(key))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            ui.post {
+                if (isFinishing || isDestroyed) return@post
+                val voices = result.getOrNull()
+                if (voices.isNullOrEmpty()) {
+                    val why = (result.exceptionOrNull() as? IllegalStateException)?.message
+                        ?: if (result.isSuccess) "No voices in this ElevenLabs account" else "No connection to ElevenLabs"
+                    Toast.makeText(this, "$why.", Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Choose an ElevenLabs voice (it plays a sample)")
+                    .setItems(voices.map { it.second }.toTypedArray()) { _, which ->
+                        prefs.elevenVoiceId = voices[which].first
+                        prefs.elevenVoiceName = voices[which].second
+                        prefs.elevenEnabled = true
+                        elevenSwitch.isChecked = true
+                        elevenText.text = elevenStatus()
+                        sampleVoice()
+                    }
+                    .show()
+            }
+        }.start()
     }
 
     private fun chooseVoice() {
-        val t = testTts
-        val all = try { t?.voices?.toList() } catch (e: Exception) { null }
-        if (!testReady || all.isNullOrEmpty()) {
+        val all = speaker?.phoneVoices().orEmpty()
+        if (all.isEmpty()) {
             Toast.makeText(this, "Voices are not ready yet. Try again in a moment.", Toast.LENGTH_LONG).show()
             return
         }
@@ -99,7 +127,6 @@ class MainActivity : Activity() {
             .setTitle("Choose a voice (it plays a sample)")
             .setItems(names) { _, which ->
                 prefs.ttsVoice = if (which == 0) "" else voices[which - 1].name
-                if (which == 0) try { t?.setVoice(t.defaultVoice) } catch (e: Exception) {}
                 sampleVoice()
             }
             .show()
@@ -121,7 +148,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        testTts?.shutdown()
+        speaker?.shutdown()
+        speaker = null
         super.onDestroy()
     }
 
@@ -216,9 +244,7 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         })
         col.addView(button("6. Test the voice (connect your glasses first)") {
-            if (testReady) {
-                sampleVoice()
-            }
+            sampleVoice()
         })
 
         col.addView(button("7. Test spoken reply (speak after the second beep)") {
@@ -258,6 +284,28 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_SETTINGS))
             }
         })
+
+        col.addView(label("ElevenLabs voice (optional)", bold = true, size = 20f))
+        col.addView(label("A natural, human-sounding voice from your ElevenLabs account. It needs internet, uses your ElevenLabs credits, and sends the text of what is spoken to ElevenLabs. If it cannot be reached, the phone voice is used instead."))
+        val keyBox = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            hint = "Paste your ElevenLabs API key"
+            setText(prefs.elevenApiKey)
+        }
+        col.addView(keyBox)
+        elevenText = label(elevenStatus())
+        elevenSwitch = check("Use the ElevenLabs voice", { prefs.elevenEnabled }, {
+            prefs.elevenEnabled = it
+            elevenText.text = elevenStatus()
+        })
+        col.addView(button("Save key") {
+            prefs.elevenApiKey = keyBox.text.toString()
+            elevenText.text = elevenStatus()
+            Toast.makeText(this, if (prefs.elevenApiKey.isBlank()) "Key removed" else "Key saved", Toast.LENGTH_SHORT).show()
+        })
+        col.addView(button("Choose ElevenLabs voice") { chooseElevenVoice() })
+        col.addView(elevenSwitch)
+        col.addView(elevenText)
 
         col.addView(label("Glasses buttons", bold = true, size = 20f))
         col.addView(label("Press the button below, then tap your glasses once, twice and three times. They will say which button each one sent."))

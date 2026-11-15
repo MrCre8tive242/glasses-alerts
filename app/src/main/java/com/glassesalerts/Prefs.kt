@@ -88,4 +88,22 @@ class Prefs(context: Context) {
     var ttsPitch: Float
         get() = sp.getFloat("tts_pitch", 1.0f)
         set(v) = sp.edit().putFloat("tts_pitch", v.coerceIn(0.5f, 1.5f)).apply()
+
+    /** Speak with an ElevenLabs voice over the internet; the phone voice is the fallback. */
+    var elevenEnabled: Boolean
+        get() = sp.getBoolean("eleven_enabled", false)
+        set(v) = sp.edit().putBoolean("eleven_enabled", v).apply()
+
+    /** Stored only on this phone (app backup is off). */
+    var elevenApiKey: String
+        get() = sp.getString("eleven_key", "") ?: ""
+        set(v) = sp.edit().putString("eleven_key", v.trim()).apply()
+
+    var elevenVoiceId: String
+        get() = sp.getString("eleven_voice_id", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice_id", v).apply()
+
+    var elevenVoiceName: String
+        get() = sp.getString("eleven_voice_name", "") ?: ""
+        set(v) = sp.edit().putString("eleven_voice_name", v).apply()
 }
